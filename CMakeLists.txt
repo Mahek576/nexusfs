@@ -15,6 +15,7 @@ add_executable(nexusfs
     src/main.cpp
     src/storage/chunker.cpp
     src/storage/sha256_hasher.cpp
+    src/storage/chunk_store.cpp
 )
 
 target_include_directories(nexusfs
