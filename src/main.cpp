@@ -35,19 +35,30 @@ int main(int argc, char* argv[])
                       << chunk.index
                       << ": "
                       << chunk.data.size()
-                      << " bytes\n";
+                      << " bytes"
+                      << " | SHA-256: "
+                      << chunk.hash
+                      << '\n';
 
             total_bytes += chunk.data.size();
         }
 
-        std::cout << "Total chunks: " << chunks.size() << '\n';
-        std::cout << "Total bytes read: " << total_bytes << '\n';
+        std::cout << "Total chunks: "
+                  << chunks.size()
+                  << '\n';
+
+        std::cout << "Total bytes read: "
+                  << total_bytes
+                  << '\n';
 
         return 0;
     }
     catch (const std::exception& error)
     {
-        std::cerr << "NexusFS error: " << error.what() << '\n';
+        std::cerr << "NexusFS error: "
+                  << error.what()
+                  << '\n';
+
         return 1;
     }
 }

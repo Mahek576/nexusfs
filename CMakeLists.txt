@@ -14,11 +14,19 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 add_executable(nexusfs
     src/main.cpp
     src/storage/chunker.cpp
+    src/storage/sha256_hasher.cpp
 )
 
 target_include_directories(nexusfs
     PRIVATE
         ${PROJECT_SOURCE_DIR}/include
+)
+
+find_package(OpenSSL REQUIRED)
+
+target_link_libraries(nexusfs
+    PRIVATE
+        OpenSSL::Crypto
 )
 
 if(MSVC)

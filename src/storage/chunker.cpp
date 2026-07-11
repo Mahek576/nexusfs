@@ -1,5 +1,5 @@
 #include "nexusfs/storage/chunker.hpp"
-
+#include "nexusfs/storage/sha256_hasher.hpp"
 #include <algorithm>
 #include <fstream>
 #include <stdexcept>
@@ -70,12 +70,16 @@ std::vector<FileChunk> Chunker::split_file(
 
         buffer.resize(static_cast<std::size_t>(bytes_read));
 
-        chunks.push_back(
-            FileChunk{
-                chunk_index,
-                std::move(buffer)
-            }
-        );
+       const std::string chunk_hash =
+        Sha256Hasher::hash(buffer);
+
+      chunks.push_back(
+       FileChunk{
+        chunk_index,
+        std::move(buffer),
+        chunk_hash
+       }
+     );
 
         ++chunk_index;
     }

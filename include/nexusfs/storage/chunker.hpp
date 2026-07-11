@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <string>
 #include <vector>
 
 namespace nexusfs::storage
@@ -13,6 +14,7 @@ struct FileChunk
 {
     std::size_t index;
     std::vector<std::uint8_t> data;
+    std::string hash;
 };
 
 class Chunker
