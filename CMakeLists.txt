@@ -13,4 +13,16 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 add_executable(nexusfs
     src/main.cpp
+    src/storage/chunker.cpp
 )
+
+target_include_directories(nexusfs
+    PRIVATE
+        ${PROJECT_SOURCE_DIR}/include
+)
+
+if(MSVC)
+    target_compile_options(nexusfs PRIVATE /W4 /permissive-)
+else()
+    target_compile_options(nexusfs PRIVATE -Wall -Wextra -Wpedantic)
+endif()
