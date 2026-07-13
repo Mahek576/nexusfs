@@ -1,0 +1,70 @@
+name: NexusFS CI
+
+on:
+  push:
+    branches:
+      - main
+
+  pull_request:
+    branches:
+      - main
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nexusfs-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+
+      matrix:
+        include:
+          - name: Ubuntu GCC
+            os: ubuntu-latest
+
+          - name: Windows MSVC
+            os: windows-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up vcpkg
+        uses: lukka/run-vcpkg@v11
+
+      - name: Configure CMake on Ubuntu
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          cmake \
+            -S . \
+            -B build \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DBUILD_TESTING=ON \
+            -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
+
+      - name: Configure CMake on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          cmake `
+            -S . `
+            -B build `
+            -A x64 `
+            -DBUILD_TESTING=ON `
+            "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
+
+      - name: Build NexusFS
+        run: cmake --build build --config Debug --parallel
+
+      - name: Run NexusFS tests
+        run: ctest --test-dir build -C Debug --output-on-failure
