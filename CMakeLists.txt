@@ -7,12 +7,15 @@ project(
     LANGUAGES CXX
 )
 
+include(CTest)
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-add_executable(nexusfs
-    src/main.cpp
+find_package(OpenSSL REQUIRED)
+
+add_library(nexusfs_core STATIC
     src/cli/command_line.cpp
     src/storage/chunker.cpp
     src/storage/sha256_hasher.cpp
@@ -24,20 +27,88 @@ add_executable(nexusfs
     src/storage/file_verifier.cpp
 )
 
-target_include_directories(nexusfs
-    PRIVATE
+target_include_directories(nexusfs_core
+    PUBLIC
         ${PROJECT_SOURCE_DIR}/include
 )
 
-find_package(OpenSSL REQUIRED)
-
-target_link_libraries(nexusfs
-    PRIVATE
+target_link_libraries(nexusfs_core
+    PUBLIC
         OpenSSL::Crypto
 )
 
+add_executable(nexusfs
+    src/main.cpp
+)
+
+target_link_libraries(nexusfs
+    PRIVATE
+        nexusfs_core
+)
+
+if(BUILD_TESTING)
+    add_executable(nexusfs_tests
+        tests/test_main.cpp
+    )
+
+    target_link_libraries(nexusfs_tests
+        PRIVATE
+            nexusfs_core
+    )
+
+    add_test(
+        NAME nexusfs_tests
+        COMMAND nexusfs_tests
+    )
+endif()
+
 if(MSVC)
-    target_compile_options(nexusfs PRIVATE /W4 /permissive-)
+    target_compile_options(
+        nexusfs_core
+        PRIVATE
+            /W4
+            /permissive-
+    )
+
+    target_compile_options(
+        nexusfs
+        PRIVATE
+            /W4
+            /permissive-
+    )
+
+    if(BUILD_TESTING)
+        target_compile_options(
+            nexusfs_tests
+            PRIVATE
+                /W4
+                /permissive-
+        )
+    endif()
 else()
-    target_compile_options(nexusfs PRIVATE -Wall -Wextra -Wpedantic)
+    target_compile_options(
+        nexusfs_core
+        PRIVATE
+            -Wall
+            -Wextra
+            -Wpedantic
+    )
+
+    target_compile_options(
+        nexusfs
+        PRIVATE
+            -Wall
+            -Wextra
+            -Wpedantic
+    )
+
+    if(BUILD_TESTING)
+        target_compile_options(
+            nexusfs_tests
+            PRIVATE
+                -Wall
+                -Wextra
+                -Wpedantic
+        )
+    endif()
 endif()
