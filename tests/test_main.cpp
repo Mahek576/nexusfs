@@ -587,6 +587,421 @@ void test_manifest_rejects_trailing_data()
     );
 }
 
+void run_single_chunk_file_test(
+    std::size_t file_size,
+    const std::string& filename,
+    const std::string& test_name
+)
+{
+    constexpr std::size_t chunk_size = 1024;
+
+    TemporaryDirectory temporary_directory;
+
+    const std::filesystem::path source_path =
+        temporary_directory.path()
+        / filename;
+
+    const std::filesystem::path storage_root =
+        temporary_directory.path()
+        / "storage";
+
+    const std::filesystem::path restored_path =
+        temporary_directory.path()
+        / "restored"
+        / filename;
+
+    const auto original_data =
+        create_binary_test_data(file_size);
+
+    write_binary_file(
+        source_path,
+        original_data
+    );
+
+    const nexusfs::storage::Chunker chunker{
+        chunk_size
+    };
+
+    const auto chunks =
+        chunker.split_file(source_path);
+
+    require_equal(
+        chunks.size(),
+        static_cast<std::size_t>(1),
+        test_name + " chunk-count test"
+    );
+
+    require_equal(
+        chunks.front().index,
+        static_cast<std::size_t>(0),
+        test_name + " chunk-index test"
+    );
+
+    require_equal(
+        chunks.front().data.size(),
+        file_size,
+        test_name + " chunk-size test"
+    );
+
+    require_equal(
+        chunks.front().data,
+        original_data,
+        test_name + " chunk-data test"
+    );
+
+    nexusfs::storage::ChunkStore chunk_store{
+        storage_root
+    };
+
+    const auto chunk_store_result =
+        chunk_store.store(
+            chunks.front()
+        );
+
+    require_equal(
+        chunk_store_result,
+        nexusfs::storage::StoreResult::stored,
+        test_name + " chunk-storage test"
+    );
+
+    const auto stored_chunk =
+        chunk_store.load(
+            chunks.front().hash
+        );
+
+    require_equal(
+        stored_chunk,
+        original_data,
+        test_name + " chunk read-back test"
+    );
+
+    const auto manifest =
+        nexusfs::storage::FileManifest::create(
+            source_path,
+            chunker.chunk_size(),
+            chunks
+        );
+
+    require_equal(
+        manifest.file_size(),
+        static_cast<std::uint64_t>(file_size),
+        test_name + " manifest file-size test"
+    );
+
+    require_equal(
+        manifest.chunk_size(),
+        chunk_size,
+        test_name + " manifest chunk-size test"
+    );
+
+    require_equal(
+        manifest.chunk_count(),
+        static_cast<std::size_t>(1),
+        test_name + " manifest chunk-count test"
+    );
+
+    require_equal(
+        manifest.chunk_hashes().front(),
+        chunks.front().hash,
+        test_name + " manifest chunk-hash test"
+    );
+
+    const auto encoded_manifest =
+        nexusfs::storage::FileManifestCodec::encode(
+            manifest
+        );
+
+    const std::string manifest_id =
+        nexusfs::storage::Sha256Hasher::hash(
+            encoded_manifest
+        );
+
+    nexusfs::storage::ManifestStore manifest_store{
+        storage_root
+    };
+
+    const auto manifest_store_result =
+        manifest_store.store(
+            manifest_id,
+            encoded_manifest
+        );
+
+    require_equal(
+        manifest_store_result,
+        nexusfs::storage::ManifestStoreResult::stored,
+        test_name + " manifest-storage test"
+    );
+
+    const auto loaded_manifest_bytes =
+        manifest_store.load(
+            manifest_id
+        );
+
+    const auto decoded_manifest =
+        nexusfs::storage::FileManifestCodec::decode(
+            loaded_manifest_bytes
+        );
+
+    const auto verification_result =
+        nexusfs::storage::FileVerifier::verify(
+            decoded_manifest,
+            chunk_store
+        );
+
+    require_equal(
+        verification_result.verified_chunks.size(),
+        static_cast<std::size_t>(1),
+        test_name + " verified-chunk count test"
+    );
+
+    require_equal(
+        verification_result.total_bytes_verified,
+        static_cast<std::uint64_t>(file_size),
+        test_name + " verified-byte count test"
+    );
+
+    require_equal(
+        verification_result.verified_chunks.front()
+            .bytes_verified,
+        static_cast<std::uint64_t>(file_size),
+        test_name + " verified chunk-size test"
+    );
+
+    const auto reconstruction_result =
+        nexusfs::storage::FileReconstructor::reconstruct(
+            decoded_manifest,
+            chunk_store,
+            restored_path
+        );
+
+    require_equal(
+        reconstruction_result.chunks_loaded,
+        static_cast<std::size_t>(1),
+        test_name + " reconstructed-chunk count test"
+    );
+
+    require_equal(
+        reconstruction_result.bytes_written,
+        static_cast<std::uint64_t>(file_size),
+        test_name + " reconstructed-byte count test"
+    );
+
+    const auto restored_data =
+        read_binary_file(restored_path);
+
+    require_equal(
+        restored_data,
+        original_data,
+        test_name + " reconstructed-data test"
+    );
+}
+
+void test_sub_chunk_file_storage_pipeline()
+{
+    run_single_chunk_file_test(
+        137,
+        "small.bin",
+        "Sub-chunk file"
+    );
+}
+
+void test_exact_chunk_file_storage_pipeline()
+{
+    run_single_chunk_file_test(
+        1024,
+        "exact-chunk.bin",
+        "Exact-chunk file"
+    );
+}
+
+void test_empty_file_storage_pipeline()
+{
+    constexpr std::size_t chunk_size = 1024;
+
+    TemporaryDirectory temporary_directory;
+
+    const std::filesystem::path source_path =
+        temporary_directory.path()
+        / "empty.bin";
+
+    const std::filesystem::path storage_root =
+        temporary_directory.path()
+        / "storage";
+
+    const std::filesystem::path restored_path =
+        temporary_directory.path()
+        / "restored"
+        / "empty.bin";
+
+    write_binary_file(
+        source_path,
+        {}
+    );
+
+    const nexusfs::storage::Chunker chunker{
+        chunk_size
+    };
+
+    const auto chunks =
+        chunker.split_file(source_path);
+
+    require_true(
+        chunks.empty(),
+        "Empty-file chunk list test"
+    );
+
+    const auto manifest =
+        nexusfs::storage::FileManifest::create(
+            source_path,
+            chunker.chunk_size(),
+            chunks
+        );
+
+    require_equal(
+        manifest.original_filename(),
+        std::string{"empty.bin"},
+        "Empty-file manifest filename test"
+    );
+
+    require_equal(
+        manifest.file_size(),
+        static_cast<std::uint64_t>(0),
+        "Empty-file manifest size test"
+    );
+
+    require_equal(
+        manifest.chunk_size(),
+        chunk_size,
+        "Empty-file manifest chunk-size test"
+    );
+
+    require_equal(
+        manifest.chunk_count(),
+        static_cast<std::size_t>(0),
+        "Empty-file manifest chunk-count test"
+    );
+
+    const auto encoded_manifest =
+        nexusfs::storage::FileManifestCodec::encode(
+            manifest
+        );
+
+    require_true(
+        !encoded_manifest.empty(),
+        "Empty-file encoded manifest test"
+    );
+
+    const std::string manifest_id =
+        nexusfs::storage::Sha256Hasher::hash(
+            encoded_manifest
+        );
+
+    nexusfs::storage::ManifestStore manifest_store{
+        storage_root
+    };
+
+    const auto store_result =
+        manifest_store.store(
+            manifest_id,
+            encoded_manifest
+        );
+
+    require_equal(
+        store_result,
+        nexusfs::storage::ManifestStoreResult::stored,
+        "Empty-file manifest storage test"
+    );
+
+    const auto loaded_manifest_bytes =
+        manifest_store.load(
+            manifest_id
+        );
+
+    require_equal(
+        loaded_manifest_bytes,
+        encoded_manifest,
+        "Empty-file manifest read-back test"
+    );
+
+    const auto decoded_manifest =
+        nexusfs::storage::FileManifestCodec::decode(
+            loaded_manifest_bytes
+        );
+
+    nexusfs::storage::ChunkStore chunk_store{
+        storage_root
+    };
+
+    const auto verification_result =
+        nexusfs::storage::FileVerifier::verify(
+            decoded_manifest,
+            chunk_store
+        );
+
+    require_equal(
+        verification_result.total_bytes_verified,
+        static_cast<std::uint64_t>(0),
+        "Empty-file verified-byte count test"
+    );
+
+    require_true(
+        verification_result.verified_chunks.empty(),
+        "Empty-file verified-chunk list test"
+    );
+
+    const auto reconstruction_result =
+        nexusfs::storage::FileReconstructor::reconstruct(
+            decoded_manifest,
+            chunk_store,
+            restored_path
+        );
+
+    require_equal(
+        reconstruction_result.bytes_written,
+        static_cast<std::uint64_t>(0),
+        "Empty-file reconstructed-byte count test"
+    );
+
+    require_equal(
+        reconstruction_result.chunks_loaded,
+        static_cast<std::size_t>(0),
+        "Empty-file reconstructed-chunk count test"
+    );
+
+    require_true(
+        std::filesystem::is_regular_file(
+            restored_path
+        ),
+        "Empty-file reconstructed output existence test"
+    );
+
+    const auto restored_data =
+        read_binary_file(
+            restored_path
+        );
+
+    require_true(
+        restored_data.empty(),
+        "Empty-file reconstructed-data test"
+    );
+
+    const std::string original_hash =
+        nexusfs::storage::Sha256Hasher::hash(
+            read_binary_file(source_path)
+        );
+
+    const std::string restored_hash =
+        nexusfs::storage::Sha256Hasher::hash(
+            restored_data
+        );
+
+    require_equal(
+        restored_hash,
+        original_hash,
+        "Empty-file reconstructed hash test"
+    );
+}
+
 void test_end_to_end_storage_pipeline()
 {
     constexpr std::size_t chunk_size = 1024;
@@ -881,6 +1296,21 @@ int main()
 
         std::cout
             << "[PASS] Trailing manifest data rejection\n";
+
+        test_empty_file_storage_pipeline();
+
+        std::cout
+            << "[PASS] Empty-file storage pipeline\n";
+
+        test_sub_chunk_file_storage_pipeline();
+
+        std::cout
+            << "[PASS] Sub-chunk file storage pipeline\n";
+
+        test_exact_chunk_file_storage_pipeline();
+
+        std::cout
+            << "[PASS] Exact-chunk file storage pipeline\n";
 
         test_end_to_end_storage_pipeline();
 
