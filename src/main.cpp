@@ -100,24 +100,23 @@ int execute_store(
         const auto loaded_chunk =
             chunk_store.load(chunk.hash);
 
-        std::cout
-            << "Chunk "
-            << chunk.index
-            << ": "
-            << chunk.data.size()
-            << " bytes"
-            << " | SHA-256: "
-            << chunk.hash
-            << " | "
-            << (
-                result ==
-                nexusfs::storage::StoreResult::stored
-                    ? "stored"
-                    : "reused"
-            )
-            << " | verified "
-            << loaded_chunk.size()
-            << " bytes\n";
+        std::cout << "Chunk "
+                  << chunk.index
+                  << ": "
+                  << chunk.data.size()
+                  << " bytes"
+                  << " | SHA-256: "
+                  << chunk.hash
+                  << " | "
+                  << (
+                      result ==
+                      nexusfs::storage::StoreResult::stored
+                          ? "stored"
+                          : "reused"
+                  )
+                  << " | verified "
+                  << loaded_chunk.size()
+                  << " bytes\n";
 
         total_bytes +=
             static_cast<std::uint64_t>(
@@ -502,6 +501,152 @@ int execute_verify(
     return 0;
 }
 
+int execute_list(
+    const nexusfs::cli::ListCommand&
+)
+{
+    nexusfs::storage::ChunkStore chunk_store{
+        storage_root
+    };
+
+    nexusfs::storage::ManifestStore manifest_store{
+        storage_root
+    };
+
+    const auto manifest_ids =
+        manifest_store.list_manifest_ids();
+
+    std::size_t complete_manifests = 0;
+    std::size_t incomplete_manifests = 0;
+
+    std::cout << "Command: list\n";
+
+    std::cout << "Storage root: "
+              << storage_root
+              << '\n';
+
+    std::cout << "Stored manifests: "
+              << manifest_ids.size()
+              << '\n';
+
+    if (manifest_ids.empty())
+    {
+        std::cout
+            << "No stored manifests found.\n";
+
+        return 0;
+    }
+
+    for (
+        std::size_t index = 0;
+        index < manifest_ids.size();
+        ++index
+    )
+    {
+        const std::string& manifest_id =
+            manifest_ids[index];
+
+        const auto encoded_manifest =
+            manifest_store.load(
+                manifest_id
+            );
+
+        const auto manifest =
+            nexusfs::storage::
+                FileManifestCodec::decode(
+                    encoded_manifest
+                );
+
+        const auto canonical_manifest =
+            nexusfs::storage::
+                FileManifestCodec::encode(
+                    manifest
+                );
+
+        if (canonical_manifest != encoded_manifest)
+        {
+            throw std::runtime_error(
+                "Stored manifest is not canonically encoded: "
+                + manifest_id
+            );
+        }
+
+        std::size_t missing_chunks = 0;
+
+        for (
+            const std::string& chunk_hash :
+            manifest.chunk_hashes()
+        )
+        {
+            if (!chunk_store.contains(chunk_hash))
+            {
+                ++missing_chunks;
+            }
+        }
+
+        const bool is_complete =
+            missing_chunks == 0;
+
+        if (is_complete)
+        {
+            ++complete_manifests;
+        }
+        else
+        {
+            ++incomplete_manifests;
+        }
+
+        std::cout << "Manifest "
+                  << index
+                  << ":\n";
+
+        std::cout << "  ID: "
+                  << manifest_id
+                  << '\n';
+
+        std::cout << "  Filename: "
+                  << manifest.original_filename()
+                  << '\n';
+
+        std::cout << "  File size: "
+                  << manifest.file_size()
+                  << " bytes\n";
+
+        std::cout << "  Chunk size: "
+                  << manifest.chunk_size()
+                  << " bytes\n";
+
+        std::cout << "  Chunk references: "
+                  << manifest.chunk_count()
+                  << '\n';
+
+        std::cout << "  Missing chunks: "
+                  << missing_chunks
+                  << '\n';
+
+        std::cout << "  Storage status: "
+                  << (
+                      is_complete
+                          ? "complete"
+                          : "incomplete"
+                  )
+                  << '\n';
+    }
+
+    std::cout << "Complete manifests: "
+              << complete_manifests
+              << '\n';
+
+    std::cout << "Incomplete manifests: "
+              << incomplete_manifests
+              << '\n';
+
+    std::cout
+        << "Stored manifests listed successfully.\n";
+
+    return 0;
+}
+
 }
 
 int main(int argc, char* argv[])
@@ -550,8 +695,20 @@ int main(int argc, char* argv[])
             );
         }
 
-        return execute_verify(
-            std::get<nexusfs::cli::VerifyCommand>(
+        if (
+            const auto* verify_command =
+                std::get_if<nexusfs::cli::VerifyCommand>(
+                    &command
+                )
+        )
+        {
+            return execute_verify(
+                *verify_command
+            );
+        }
+
+        return execute_list(
+            std::get<nexusfs::cli::ListCommand>(
                 command
             )
         );

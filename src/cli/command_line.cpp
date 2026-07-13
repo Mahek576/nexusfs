@@ -193,6 +193,19 @@ Command CommandLineParser::parse(
         };
     }
 
+    if (command_name == "list")
+    {
+        if (argument_count != 2)
+        {
+            throw std::invalid_argument(
+                "The list command does not accept additional arguments.\n\n"
+                + usage()
+            );
+        }
+
+        return ListCommand{};
+    }
+
     throw std::invalid_argument(
         "Unknown NexusFS command: "
         + command_name
@@ -208,7 +221,8 @@ std::string CommandLineParser::usage()
         "  nexusfs store <file-path>\n"
         "  nexusfs restore <manifest-id> <output-path>\n"
         "  nexusfs inspect <manifest-id>\n"
-        "  nexusfs verify <manifest-id>";
+        "  nexusfs verify <manifest-id>\n"
+        "  nexusfs list";
 }
 
 }

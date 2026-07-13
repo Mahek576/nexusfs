@@ -2,7 +2,9 @@
 
 #include "nexusfs/storage/sha256_hasher.hpp"
 
+#include <algorithm>
 #include <chrono>
+#include <cstddef>
 #include <fstream>
 #include <limits>
 #include <stdexcept>
@@ -11,6 +13,43 @@
 
 namespace nexusfs::storage
 {
+
+namespace
+{
+
+bool is_lowercase_hexadecimal(
+    const std::string& value,
+    std::size_t expected_length
+)
+{
+    if (value.size() != expected_length)
+    {
+        return false;
+    }
+
+    for (const char character : value)
+    {
+        const bool is_decimal_digit =
+            character >= '0' &&
+            character <= '9';
+
+        const bool is_lowercase_hex_digit =
+            character >= 'a' &&
+            character <= 'f';
+
+        if (
+            !is_decimal_digit &&
+            !is_lowercase_hex_digit
+        )
+        {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+}
 
 ManifestStore::ManifestStore(
     std::filesystem::path root_directory
@@ -70,9 +109,9 @@ ManifestStoreResult ManifestStore::store(
 
     if (std::filesystem::exists(final_path))
     {
-       (void)load(manifest_id);
+        (void)load(manifest_id);
 
-       return ManifestStoreResult::already_exists;
+        return ManifestStoreResult::already_exists;
     }
 
     const std::filesystem::path parent_directory =
@@ -106,16 +145,17 @@ ManifestStoreResult ManifestStore::store(
         + std::to_string(timestamp);
 
     if (
-       encoded_manifest.size() >
-       static_cast<std::size_t>(
-       std::numeric_limits<std::streamsize>::max()
-       )
+        encoded_manifest.size() >
+        static_cast<std::size_t>(
+            std::numeric_limits<std::streamsize>::max()
+        )
     )
     {
         throw std::runtime_error(
-        "Encoded manifest is too large for stream-based storage."
-         );
+            "Encoded manifest is too large for stream-based storage."
+        );
     }
+
     {
         std::ofstream output{
             temporary_path,
@@ -323,6 +363,162 @@ std::vector<std::uint8_t> ManifestStore::load(
     return encoded_manifest;
 }
 
+std::vector<std::string>
+ManifestStore::list_manifest_ids() const
+{
+    std::vector<std::string> manifest_ids;
+
+    std::error_code error;
+
+    std::filesystem::directory_iterator shard_iterator{
+        manifests_directory_,
+        error
+    };
+
+    if (error)
+    {
+        throw std::runtime_error(
+            "Failed to enumerate manifest shards: "
+            + error.message()
+        );
+    }
+
+    const std::filesystem::directory_iterator end;
+
+    while (shard_iterator != end)
+    {
+        const std::filesystem::directory_entry&
+            shard_entry = *shard_iterator;
+
+        std::error_code type_error;
+
+        const bool is_directory =
+            shard_entry.is_directory(type_error);
+
+        if (type_error)
+        {
+            throw std::runtime_error(
+                "Failed to inspect manifest shard entry: "
+                + type_error.message()
+            );
+        }
+
+        if (is_directory)
+        {
+            const std::string shard_name =
+                shard_entry.path()
+                    .filename()
+                    .string();
+
+            if (
+                is_lowercase_hexadecimal(
+                    shard_name,
+                    2
+                )
+            )
+            {
+                std::error_code manifest_error;
+
+                std::filesystem::directory_iterator
+                    manifest_iterator{
+                        shard_entry.path(),
+                        manifest_error
+                    };
+
+                if (manifest_error)
+                {
+                    throw std::runtime_error(
+                        "Failed to enumerate manifest shard: "
+                        + manifest_error.message()
+                    );
+                }
+
+                while (manifest_iterator != end)
+                {
+                    const std::filesystem::directory_entry&
+                        manifest_entry =
+                            *manifest_iterator;
+
+                    std::error_code file_type_error;
+
+                    const bool is_regular_file =
+                        manifest_entry.is_regular_file(
+                            file_type_error
+                        );
+
+                    if (file_type_error)
+                    {
+                        throw std::runtime_error(
+                            "Failed to inspect manifest entry: "
+                            + file_type_error.message()
+                        );
+                    }
+
+                    if (is_regular_file)
+                    {
+                        const std::string manifest_name =
+                            manifest_entry.path()
+                                .filename()
+                                .string();
+
+                        if (
+                            is_lowercase_hexadecimal(
+                                manifest_name,
+                                62
+                            )
+                        )
+                        {
+                            manifest_ids.push_back(
+                                shard_name
+                                + manifest_name
+                            );
+                        }
+                    }
+
+                    manifest_iterator.increment(
+                        manifest_error
+                    );
+
+                    if (manifest_error)
+                    {
+                        throw std::runtime_error(
+                            "Failed while enumerating "
+                            "manifest shard: "
+                            + manifest_error.message()
+                        );
+                    }
+                }
+            }
+        }
+
+        shard_iterator.increment(error);
+
+        if (error)
+        {
+            throw std::runtime_error(
+                "Failed while enumerating "
+                "manifest shards: "
+                + error.message()
+            );
+        }
+    }
+
+    std::sort(
+        manifest_ids.begin(),
+        manifest_ids.end()
+    );
+
+    manifest_ids.erase(
+        std::unique(
+            manifest_ids.begin(),
+            manifest_ids.end()
+        ),
+        manifest_ids.end()
+    );
+
+    return manifest_ids;
+}
+
 const std::filesystem::path&
 ManifestStore::root_directory() const noexcept
 {
@@ -359,13 +555,13 @@ void ManifestStore::validate_manifest_id(
             character >= '0' &&
             character <= '9';
 
-        const bool is_lowercase_hexadecimal =
+        const bool is_lowercase_hexadecimal_character =
             character >= 'a' &&
             character <= 'f';
 
         if (
             !is_decimal_digit &&
-            !is_lowercase_hexadecimal
+            !is_lowercase_hexadecimal_character
         )
         {
             throw std::invalid_argument(

@@ -35,6 +35,9 @@ public:
         const std::string& manifest_id
     ) const;
 
+    [[nodiscard]] std::vector<std::string>
+    list_manifest_ids() const;
+
     [[nodiscard]] const std::filesystem::path&
     root_directory() const noexcept;
 
