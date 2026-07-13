@@ -19,9 +19,15 @@ struct RestoreCommand
     std::filesystem::path output_path;
 };
 
+struct InspectCommand
+{
+    std::string manifest_id;
+};
+
 using Command = std::variant<
     StoreCommand,
-    RestoreCommand
+    RestoreCommand,
+    InspectCommand
 >;
 
 class CommandLineParser

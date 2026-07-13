@@ -282,6 +282,133 @@ int execute_restore(
     return 0;
 }
 
+int execute_inspect(
+    const nexusfs::cli::InspectCommand& command
+)
+{
+    nexusfs::storage::ChunkStore chunk_store{
+        storage_root
+    };
+
+    nexusfs::storage::ManifestStore manifest_store{
+        storage_root
+    };
+
+    const auto encoded_manifest =
+        manifest_store.load(
+            command.manifest_id
+        );
+
+    const auto manifest =
+        nexusfs::storage::FileManifestCodec::decode(
+            encoded_manifest
+        );
+
+    const auto canonical_manifest =
+        nexusfs::storage::FileManifestCodec::encode(
+            manifest
+        );
+
+    if (canonical_manifest != encoded_manifest)
+    {
+        throw std::runtime_error(
+            "Stored manifest is not canonically encoded."
+        );
+    }
+
+    std::size_t available_chunks = 0;
+    std::size_t missing_chunks = 0;
+
+    std::cout << "Command: inspect\n";
+
+    std::cout << "Manifest ID: "
+              << command.manifest_id
+              << '\n';
+
+    std::cout << "Storage root: "
+              << storage_root
+              << '\n';
+
+    std::cout << "Manifest format version: "
+              << manifest.format_version()
+              << '\n';
+
+    std::cout << "Original filename: "
+              << manifest.original_filename()
+              << '\n';
+
+    std::cout << "Original file size: "
+              << manifest.file_size()
+              << " bytes\n";
+
+    std::cout << "Configured chunk size: "
+              << manifest.chunk_size()
+              << " bytes\n";
+
+    std::cout << "Encoded manifest size: "
+              << encoded_manifest.size()
+              << " bytes\n";
+
+    std::cout << "Chunk references: "
+              << manifest.chunk_count()
+              << '\n';
+
+    for (
+        std::size_t index = 0;
+        index < manifest.chunk_hashes().size();
+        ++index
+    )
+    {
+        const std::string& chunk_hash =
+            manifest.chunk_hashes()[index];
+
+        const bool is_available =
+            chunk_store.contains(chunk_hash);
+
+        if (is_available)
+        {
+            ++available_chunks;
+        }
+        else
+        {
+            ++missing_chunks;
+        }
+
+        std::cout << "Chunk reference "
+                  << index
+                  << ": "
+                  << chunk_hash
+                  << " | "
+                  << (
+                      is_available
+                          ? "present"
+                          : "missing"
+                  )
+                  << '\n';
+    }
+
+    std::cout << "Available chunks: "
+              << available_chunks
+              << '\n';
+
+    std::cout << "Missing chunks: "
+              << missing_chunks
+              << '\n';
+
+    std::cout << "Storage completeness: "
+              << (
+                  missing_chunks == 0
+                      ? "complete"
+                      : "incomplete"
+              )
+              << '\n';
+
+    std::cout
+        << "Manifest inspected successfully.\n";
+
+    return 0;
+}
+
 }
 
 int main(int argc, char* argv[])
@@ -306,8 +433,20 @@ int main(int argc, char* argv[])
             );
         }
 
-        return execute_restore(
-            std::get<nexusfs::cli::RestoreCommand>(
+        if (
+            const auto* restore_command =
+                std::get_if<nexusfs::cli::RestoreCommand>(
+                    &command
+                )
+        )
+        {
+            return execute_restore(
+                *restore_command
+            );
+        }
+
+        return execute_inspect(
+            std::get<nexusfs::cli::InspectCommand>(
                 command
             )
         );

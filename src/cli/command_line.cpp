@@ -44,6 +44,22 @@ bool is_valid_manifest_id(
     return true;
 }
 
+void validate_manifest_id(
+    const std::string& manifest_id,
+    const std::string& command_name
+)
+{
+    if (!is_valid_manifest_id(manifest_id))
+    {
+        throw std::invalid_argument(
+            "The "
+            + command_name
+            + " manifest ID must contain exactly "
+              "64 lowercase hexadecimal characters."
+        );
+    }
+}
+
 }
 
 Command CommandLineParser::parse(
@@ -107,13 +123,10 @@ Command CommandLineParser::parse(
             argument_values[2]
         };
 
-        if (!is_valid_manifest_id(manifest_id))
-        {
-            throw std::invalid_argument(
-                "The restore manifest ID must contain exactly "
-                "64 lowercase hexadecimal characters."
-            );
-        }
+        validate_manifest_id(
+            manifest_id,
+            "restore"
+        );
 
         std::filesystem::path output_path{
             argument_values[3]
@@ -132,6 +145,30 @@ Command CommandLineParser::parse(
         };
     }
 
+    if (command_name == "inspect")
+    {
+        if (argument_count != 3)
+        {
+            throw std::invalid_argument(
+                "The inspect command requires exactly one manifest ID.\n\n"
+                + usage()
+            );
+        }
+
+        std::string manifest_id{
+            argument_values[2]
+        };
+
+        validate_manifest_id(
+            manifest_id,
+            "inspect"
+        );
+
+        return InspectCommand{
+            std::move(manifest_id)
+        };
+    }
+
     throw std::invalid_argument(
         "Unknown NexusFS command: "
         + command_name
@@ -145,7 +182,8 @@ std::string CommandLineParser::usage()
     return
         "Usage:\n"
         "  nexusfs store <file-path>\n"
-        "  nexusfs restore <manifest-id> <output-path>";
+        "  nexusfs restore <manifest-id> <output-path>\n"
+        "  nexusfs inspect <manifest-id>";
 }
 
 }
