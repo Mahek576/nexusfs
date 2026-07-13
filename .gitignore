@@ -6,3 +6,4 @@ build/
 *.ilk
 *.log
 nexusfs_data/
+reconstructed/
