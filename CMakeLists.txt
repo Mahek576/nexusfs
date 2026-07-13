@@ -16,6 +16,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 find_package(OpenSSL REQUIRED)
 
 add_library(nexusfs_core STATIC
+    src/app/nexusfs_service.cpp
     src/cli/command_line.cpp
     src/storage/chunker.cpp
     src/storage/sha256_hasher.cpp
