@@ -24,10 +24,16 @@ struct InspectCommand
     std::string manifest_id;
 };
 
+struct VerifyCommand
+{
+    std::string manifest_id;
+};
+
 using Command = std::variant<
     StoreCommand,
     RestoreCommand,
-    InspectCommand
+    InspectCommand,
+    VerifyCommand
 >;
 
 class CommandLineParser

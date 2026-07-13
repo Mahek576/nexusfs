@@ -4,6 +4,7 @@
 #include "nexusfs/storage/file_manifest.hpp"
 #include "nexusfs/storage/file_manifest_codec.hpp"
 #include "nexusfs/storage/file_reconstructor.hpp"
+#include "nexusfs/storage/file_verifier.hpp"
 #include "nexusfs/storage/manifest_store.hpp"
 #include "nexusfs/storage/sha256_hasher.hpp"
 
@@ -409,6 +410,98 @@ int execute_inspect(
     return 0;
 }
 
+int execute_verify(
+    const nexusfs::cli::VerifyCommand& command
+)
+{
+    nexusfs::storage::ChunkStore chunk_store{
+        storage_root
+    };
+
+    nexusfs::storage::ManifestStore manifest_store{
+        storage_root
+    };
+
+    const auto encoded_manifest =
+        manifest_store.load(
+            command.manifest_id
+        );
+
+    const auto manifest =
+        nexusfs::storage::FileManifestCodec::decode(
+            encoded_manifest
+        );
+
+    const auto canonical_manifest =
+        nexusfs::storage::FileManifestCodec::encode(
+            manifest
+        );
+
+    if (canonical_manifest != encoded_manifest)
+    {
+        throw std::runtime_error(
+            "Stored manifest is not canonically encoded."
+        );
+    }
+
+    const auto verification_result =
+        nexusfs::storage::FileVerifier::verify(
+            manifest,
+            chunk_store
+        );
+
+    std::cout << "Command: verify\n";
+
+    std::cout << "Manifest ID: "
+              << command.manifest_id
+              << '\n';
+
+    std::cout << "Storage root: "
+              << storage_root
+              << '\n';
+
+    std::cout << "Original filename: "
+              << manifest.original_filename()
+              << '\n';
+
+    std::cout << "Manifest file size: "
+              << manifest.file_size()
+              << " bytes\n";
+
+    std::cout << "Manifest chunk references: "
+              << manifest.chunk_count()
+              << '\n';
+
+    for (
+        const auto& verified_chunk :
+        verification_result.verified_chunks
+    )
+    {
+        std::cout << "Verified chunk "
+                  << verified_chunk.index
+                  << ": "
+                  << verified_chunk.hash
+                  << " | "
+                  << verified_chunk.bytes_verified
+                  << " bytes\n";
+    }
+
+    std::cout << "Verified chunks: "
+              << verification_result.verified_chunks.size()
+              << '\n';
+
+    std::cout << "Total bytes verified: "
+              << verification_result.total_bytes_verified
+              << '\n';
+
+    std::cout << "Storage integrity: healthy\n";
+
+    std::cout
+        << "File storage verified successfully.\n";
+
+    return 0;
+}
+
 }
 
 int main(int argc, char* argv[])
@@ -445,8 +538,20 @@ int main(int argc, char* argv[])
             );
         }
 
-        return execute_inspect(
-            std::get<nexusfs::cli::InspectCommand>(
+        if (
+            const auto* inspect_command =
+                std::get_if<nexusfs::cli::InspectCommand>(
+                    &command
+                )
+        )
+        {
+            return execute_inspect(
+                *inspect_command
+            );
+        }
+
+        return execute_verify(
+            std::get<nexusfs::cli::VerifyCommand>(
                 command
             )
         );

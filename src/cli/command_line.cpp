@@ -169,6 +169,30 @@ Command CommandLineParser::parse(
         };
     }
 
+    if (command_name == "verify")
+    {
+        if (argument_count != 3)
+        {
+            throw std::invalid_argument(
+                "The verify command requires exactly one manifest ID.\n\n"
+                + usage()
+            );
+        }
+
+        std::string manifest_id{
+            argument_values[2]
+        };
+
+        validate_manifest_id(
+            manifest_id,
+            "verify"
+        );
+
+        return VerifyCommand{
+            std::move(manifest_id)
+        };
+    }
+
     throw std::invalid_argument(
         "Unknown NexusFS command: "
         + command_name
@@ -183,7 +207,8 @@ std::string CommandLineParser::usage()
         "Usage:\n"
         "  nexusfs store <file-path>\n"
         "  nexusfs restore <manifest-id> <output-path>\n"
-        "  nexusfs inspect <manifest-id>";
+        "  nexusfs inspect <manifest-id>\n"
+        "  nexusfs verify <manifest-id>";
 }
 
 }

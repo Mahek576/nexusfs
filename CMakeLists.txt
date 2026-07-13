@@ -21,6 +21,7 @@ add_executable(nexusfs
     src/storage/file_manifest_codec.cpp
     src/storage/manifest_store.cpp
     src/storage/file_reconstructor.cpp
+    src/storage/file_verifier.cpp
 )
 
 target_include_directories(nexusfs
