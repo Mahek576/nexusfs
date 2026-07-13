@@ -13,6 +13,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 add_executable(nexusfs
     src/main.cpp
+    src/cli/command_line.cpp
     src/storage/chunker.cpp
     src/storage/sha256_hasher.cpp
     src/storage/chunk_store.cpp
