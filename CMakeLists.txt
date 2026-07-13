@@ -60,6 +60,20 @@ if(BUILD_TESTING)
         NAME nexusfs_tests
         COMMAND nexusfs_tests
     )
+
+    add_executable(nexusfs_cli_tests
+        tests/test_cli.cpp
+    )
+
+    target_link_libraries(nexusfs_cli_tests
+        PRIVATE
+            nexusfs_core
+    )
+
+    add_test(
+        NAME nexusfs_cli_tests
+        COMMAND nexusfs_cli_tests
+    )
 endif()
 
 if(MSVC)
@@ -80,6 +94,13 @@ if(MSVC)
     if(BUILD_TESTING)
         target_compile_options(
             nexusfs_tests
+            PRIVATE
+                /W4
+                /permissive-
+        )
+
+        target_compile_options(
+            nexusfs_cli_tests
             PRIVATE
                 /W4
                 /permissive-
@@ -105,6 +126,14 @@ else()
     if(BUILD_TESTING)
         target_compile_options(
             nexusfs_tests
+            PRIVATE
+                -Wall
+                -Wextra
+                -Wpedantic
+        )
+
+        target_compile_options(
+            nexusfs_cli_tests
             PRIVATE
                 -Wall
                 -Wextra
