@@ -25,6 +25,7 @@ add_library(
         src/cli/command_line.cpp
         src/http/http_router.cpp
         src/http/http_server.cpp
+        src/http/http_session.cpp
         src/storage/chunker.cpp
         src/storage/sha256_hasher.cpp
         src/storage/chunk_store.cpp

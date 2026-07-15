@@ -1,13 +1,13 @@
 #include "nexusfs/http/http_server.hpp"
 
+#include "nexusfs/http/http_session.hpp"
+
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/ip/address.hpp>
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/asio/socket_base.hpp>
-#include <boost/beast/core.hpp>
-#include <boost/beast/http.hpp>
+#include <boost/beast/core/error.hpp>
 
-#include <cstdint>
 #include <exception>
 #include <iostream>
 #include <stdexcept>
@@ -20,15 +20,11 @@ namespace nexusfs::http
 
 namespace asio = boost::asio;
 namespace beast = boost::beast;
-namespace beast_http = boost::beast::http;
 
 using Tcp = asio::ip::tcp;
 
 namespace
 {
-
-constexpr std::uint64_t maximum_request_body_size =
-    1024ULL * 1024ULL;
 
 void report_network_error(
     const beast::error_code& error,
@@ -41,97 +37,6 @@ void report_network_error(
         << " error: "
         << error.message()
         << '\n';
-}
-
-void run_http_session(
-    Tcp::socket socket,
-    HttpRouter router
-)
-{
-    beast::flat_buffer buffer;
-    beast::error_code error;
-
-    for (;;)
-    {
-        beast_http::request_parser<
-            beast_http::string_body
-        > parser;
-
-        parser.body_limit(
-            maximum_request_body_size
-        );
-
-        beast_http::read(
-            socket,
-            buffer,
-            parser,
-            error
-        );
-
-        if (
-            error ==
-            beast_http::error::end_of_stream
-        )
-        {
-            break;
-        }
-
-        if (error)
-        {
-            report_network_error(
-                error,
-                "request read"
-            );
-
-            break;
-        }
-
-        HttpRouter::Request request =
-            parser.release();
-
-        HttpRouter::Response response =
-            router.route(request);
-
-        const bool close_connection =
-            response.need_eof();
-
-        beast_http::write(
-            socket,
-            response,
-            error
-        );
-
-        if (error)
-        {
-            report_network_error(
-                error,
-                "response write"
-            );
-
-            break;
-        }
-
-        if (close_connection)
-        {
-            break;
-        }
-    }
-
-    socket.shutdown(
-        Tcp::socket::shutdown_send,
-        error
-    );
-
-    if (
-        error &&
-        error != asio::error::not_connected
-    )
-    {
-        report_network_error(
-            error,
-            "connection shutdown"
-        );
-    }
 }
 
 }
@@ -271,10 +176,12 @@ void HttpServer::run() const
             {
                 try
                 {
-                    run_http_session(
+                    HttpSession session{
                         std::move(socket),
                         std::move(router)
-                    );
+                    };
+
+                    session.run();
                 }
                 catch (
                     const std::exception& exception
