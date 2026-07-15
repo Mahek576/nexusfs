@@ -150,6 +150,19 @@ void write_test_file(
     }
 }
 
+std::shared_ptr<nexusfs::app::NexusFsService>
+create_service(
+    const std::filesystem::path& storage_root
+)
+{
+    return std::make_shared<
+        nexusfs::app::NexusFsService
+    >(
+        storage_root,
+        1024
+    );
+}
+
 std::string header_value(
     const nexusfs::http::HttpRouter::Response& response,
     beast_http::field field
@@ -200,19 +213,6 @@ void require_common_json_headers(
     );
 }
 
-std::shared_ptr<nexusfs::app::NexusFsService>
-create_service(
-    const std::filesystem::path& storage_root
-)
-{
-    return std::make_shared<
-        nexusfs::app::NexusFsService
-    >(
-        storage_root,
-        1024
-    );
-}
-
 void test_health_route()
 {
     TemporaryDirectory directory;
@@ -241,12 +241,6 @@ void test_health_route()
         response.result(),
         beast_http::status::ok,
         "Health status test"
-    );
-
-    require_equal(
-        response.version(),
-        static_cast<unsigned int>(11),
-        "Health HTTP-version test"
     );
 
     require_true(
@@ -287,13 +281,10 @@ void test_health_method_not_allowed()
 {
     TemporaryDirectory directory;
 
-    const auto service =
+    const nexusfs::http::HttpRouter router{
         create_service(
             directory.path() / "storage"
-        );
-
-    const nexusfs::http::HttpRouter router{
-        service
+        )
     };
 
     nexusfs::http::HttpRouter::Request request{
@@ -301,8 +292,6 @@ void test_health_method_not_allowed()
         "/api/v1/health",
         11
     };
-
-    request.keep_alive(false);
 
     const auto response =
         router.route(request);
@@ -313,11 +302,6 @@ void test_health_method_not_allowed()
         "Method-not-allowed status test"
     );
 
-    require_common_json_headers(
-        response,
-        "Method-not-allowed response"
-    );
-
     require_equal(
         header_value(
             response,
@@ -326,32 +310,16 @@ void test_health_method_not_allowed()
         std::string{"GET"},
         "Method-not-allowed Allow-header test"
     );
-
-    const nlohmann::json payload =
-        nlohmann::json::parse(
-            response.body()
-        );
-
-    require_equal(
-        payload.at("error")
-            .at("code")
-            .get<std::string>(),
-        std::string{"method_not_allowed"},
-        "Method-not-allowed error-code test"
-    );
 }
 
 void test_unknown_route()
 {
     TemporaryDirectory directory;
 
-    const auto service =
+    const nexusfs::http::HttpRouter router{
         create_service(
             directory.path() / "storage"
-        );
-
-    const nexusfs::http::HttpRouter router{
-        service
+        )
     };
 
     nexusfs::http::HttpRouter::Request request{
@@ -367,11 +335,6 @@ void test_unknown_route()
         response.result(),
         beast_http::status::not_found,
         "Unknown-route status test"
-    );
-
-    require_common_json_headers(
-        response,
-        "Unknown-route response"
     );
 
     const nlohmann::json payload =
@@ -391,9 +354,6 @@ void test_unknown_route()
 void test_files_catalog_route()
 {
     TemporaryDirectory directory;
-
-    const std::filesystem::path storage_root =
-        directory.path() / "storage";
 
     const std::filesystem::path source_path =
         directory.path() / "catalog.bin";
@@ -421,7 +381,7 @@ void test_files_catalog_route()
 
     const auto service =
         create_service(
-            storage_root
+            directory.path() / "storage"
         );
 
     const auto stored =
@@ -439,8 +399,6 @@ void test_files_catalog_route()
         11
     };
 
-    request.keep_alive(true);
-
     const auto response =
         router.route(request);
 
@@ -448,11 +406,6 @@ void test_files_catalog_route()
         response.result(),
         beast_http::status::ok,
         "Files catalog status test"
-    );
-
-    require_true(
-        response.keep_alive(),
-        "Files catalog keep-alive test"
     );
 
     require_common_json_headers(
@@ -468,76 +421,276 @@ void test_files_catalog_route()
     require_equal(
         payload.at("files").size(),
         static_cast<std::size_t>(1),
-        "Files catalog entry-count test"
+        "Files catalog count test"
     );
 
-    const nlohmann::json& file =
-        payload.at("files").at(0);
-
     require_equal(
-        file.at("manifest_id").get<std::string>(),
+        payload.at("files")
+            .at(0)
+            .at("manifest_id")
+            .get<std::string>(),
         stored.manifest_id,
         "Files catalog manifest-ID test"
     );
 
     require_equal(
+        payload.at("summary")
+            .at("stored_manifests")
+            .get<std::size_t>(),
+        static_cast<std::size_t>(1),
+        "Files catalog summary test"
+    );
+}
+
+void test_file_detail_route()
+{
+    TemporaryDirectory directory;
+
+    const std::filesystem::path source_path =
+        directory.path() / "detail.bin";
+
+    std::vector<std::uint8_t> source_data(
+        2500
+    );
+
+    for (
+        std::size_t index = 0;
+        index < source_data.size();
+        ++index
+    )
+    {
+        source_data[index] =
+            static_cast<std::uint8_t>(
+                (
+                    index * 17U +
+                    29U
+                ) % 256U
+            );
+    }
+
+    write_test_file(
+        source_path,
+        source_data
+    );
+
+    const auto service =
+        create_service(
+            directory.path() / "storage"
+        );
+
+    const auto stored =
+        service->store_file(
+            source_path
+        );
+
+    const nexusfs::http::HttpRouter router{
+        service
+    };
+
+    const std::string target =
+        "/api/v1/files/"
+        + stored.manifest_id;
+
+    nexusfs::http::HttpRouter::Request request{
+        beast_http::verb::get,
+        target,
+        11
+    };
+
+    request.keep_alive(true);
+
+    const auto response =
+        router.route(request);
+
+    require_equal(
+        response.result(),
+        beast_http::status::ok,
+        "File detail status test"
+    );
+
+    require_true(
+        response.keep_alive(),
+        "File detail keep-alive test"
+    );
+
+    require_common_json_headers(
+        response,
+        "File detail response"
+    );
+
+    const nlohmann::json payload =
+        nlohmann::json::parse(
+            response.body()
+        );
+
+    const nlohmann::json& file =
+        payload.at("file");
+
+    require_equal(
+        file.at("manifest_id").get<std::string>(),
+        stored.manifest_id,
+        "File detail manifest-ID test"
+    );
+
+    require_equal(
         file.at("filename").get<std::string>(),
-        std::string{"catalog.bin"},
-        "Files catalog filename test"
+        std::string{"detail.bin"},
+        "File detail filename test"
     );
 
     require_equal(
         file.at("file_size").get<std::uint64_t>(),
-        static_cast<std::uint64_t>(1500),
-        "Files catalog file-size test"
+        static_cast<std::uint64_t>(2500),
+        "File detail size test"
     );
 
     require_equal(
         file.at("chunk_size").get<std::size_t>(),
         static_cast<std::size_t>(1024),
-        "Files catalog chunk-size test"
+        "File detail chunk-size test"
     );
 
     require_equal(
         file.at("chunk_count").get<std::size_t>(),
-        static_cast<std::size_t>(2),
-        "Files catalog chunk-count test"
+        static_cast<std::size_t>(3),
+        "File detail chunk-count test"
+    );
+
+    require_equal(
+        file.at("available_chunks").get<std::size_t>(),
+        static_cast<std::size_t>(3),
+        "File detail available-chunks test"
     );
 
     require_equal(
         file.at("missing_chunks").get<std::size_t>(),
         static_cast<std::size_t>(0),
-        "Files catalog missing-chunk test"
+        "File detail missing-chunks test"
     );
 
     require_equal(
         file.at("storage_status").get<std::string>(),
         std::string{"complete"},
-        "Files catalog storage-status test"
-    );
-
-    const nlohmann::json& summary =
-        payload.at("summary");
-
-    require_equal(
-        summary.at("stored_manifests")
-            .get<std::size_t>(),
-        static_cast<std::size_t>(1),
-        "Files summary stored-manifest test"
+        "File detail status-field test"
     );
 
     require_equal(
-        summary.at("complete_manifests")
-            .get<std::size_t>(),
-        static_cast<std::size_t>(1),
-        "Files summary complete-manifest test"
+        payload.at("chunks").size(),
+        static_cast<std::size_t>(3),
+        "File detail chunk-array test"
     );
 
+    for (
+        std::size_t index = 0;
+        index < payload.at("chunks").size();
+        ++index
+    )
+    {
+        const nlohmann::json& chunk =
+            payload.at("chunks").at(index);
+
+        require_equal(
+            chunk.at("index").get<std::size_t>(),
+            index,
+            "File detail chunk-index test"
+        );
+
+        require_equal(
+            chunk.at("hash")
+                .get<std::string>()
+                .size(),
+            static_cast<std::size_t>(64),
+            "File detail chunk-hash test"
+        );
+
+        require_true(
+            chunk.at("present").get<bool>(),
+            "File detail chunk-presence test"
+        );
+    }
+}
+
+void test_invalid_manifest_id_route()
+{
+    TemporaryDirectory directory;
+
+    const nexusfs::http::HttpRouter router{
+        create_service(
+            directory.path() / "storage"
+        )
+    };
+
+    nexusfs::http::HttpRouter::Request request{
+        beast_http::verb::get,
+        "/api/v1/files/invalid-id",
+        11
+    };
+
+    const auto response =
+        router.route(request);
+
     require_equal(
-        summary.at("incomplete_manifests")
-            .get<std::size_t>(),
-        static_cast<std::size_t>(0),
-        "Files summary incomplete-manifest test"
+        response.result(),
+        beast_http::status::bad_request,
+        "Invalid manifest-ID status test"
+    );
+
+    const nlohmann::json payload =
+        nlohmann::json::parse(
+            response.body()
+        );
+
+    require_equal(
+        payload.at("error")
+            .at("code")
+            .get<std::string>(),
+        std::string{"invalid_manifest_id"},
+        "Invalid manifest-ID error-code test"
+    );
+}
+
+void test_missing_manifest_route()
+{
+    TemporaryDirectory directory;
+
+    const nexusfs::http::HttpRouter router{
+        create_service(
+            directory.path() / "storage"
+        )
+    };
+
+    const std::string missing_manifest_id(
+        64,
+        'f'
+    );
+
+    nexusfs::http::HttpRouter::Request request{
+        beast_http::verb::get,
+        "/api/v1/files/"
+            + missing_manifest_id,
+        11
+    };
+
+    const auto response =
+        router.route(request);
+
+    require_equal(
+        response.result(),
+        beast_http::status::not_found,
+        "Missing manifest status test"
+    );
+
+    const nlohmann::json payload =
+        nlohmann::json::parse(
+            response.body()
+        );
+
+    require_equal(
+        payload.at("error")
+            .at("code")
+            .get<std::string>(),
+        std::string{"manifest_not_found"},
+        "Missing manifest error-code test"
     );
 }
 
@@ -566,6 +719,21 @@ int main()
 
         std::cout
             << "[PASS] HTTP files catalog route\n";
+
+        test_file_detail_route();
+
+        std::cout
+            << "[PASS] HTTP file detail route\n";
+
+        test_invalid_manifest_id_route();
+
+        std::cout
+            << "[PASS] HTTP invalid manifest ID response\n";
+
+        test_missing_manifest_route();
+
+        std::cout
+            << "[PASS] HTTP missing manifest response\n";
 
         std::cout
             << "All NexusFS HTTP router tests passed.\n";

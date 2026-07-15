@@ -2,9 +2,11 @@
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <exception>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <utility>
 
 namespace nexusfs::http
@@ -14,6 +16,56 @@ namespace beast_http = boost::beast::http;
 
 namespace
 {
+
+constexpr std::string_view health_route{
+    "/api/v1/health"
+};
+
+constexpr std::string_view files_route{
+    "/api/v1/files"
+};
+
+constexpr std::string_view file_detail_prefix{
+    "/api/v1/files/"
+};
+
+std::string_view request_target(
+    const HttpRouter::Request& request
+)
+{
+    const auto target =
+        request.target();
+
+    return std::string_view{
+        target.data(),
+        target.size()
+    };
+}
+
+bool is_valid_manifest_id(
+    std::string_view manifest_id
+)
+{
+    if (manifest_id.size() != 64)
+    {
+        return false;
+    }
+
+    return std::all_of(
+        manifest_id.begin(),
+        manifest_id.end(),
+        [](char character)
+        {
+            return (
+                character >= '0' &&
+                character <= '9'
+            ) || (
+                character >= 'a' &&
+                character <= 'f'
+            );
+        }
+    );
+}
 
 HttpRouter::Response make_json_response(
     beast_http::status status,
@@ -54,8 +106,11 @@ HttpRouter::Response make_json_response(
     return response;
 }
 
-HttpRouter::Response make_method_not_allowed_response(
-    const HttpRouter::Request& request
+HttpRouter::Response make_error_response(
+    const HttpRouter::Request& request,
+    beast_http::status status,
+    std::string code,
+    std::string message
 )
 {
     const nlohmann::ordered_json payload = {
@@ -64,23 +119,35 @@ HttpRouter::Response make_method_not_allowed_response(
             {
                 {
                     "code",
-                    "method_not_allowed"
+                    std::move(code)
                 },
                 {
                     "message",
-                    "The requested HTTP method is not "
-                    "supported for this route."
+                    std::move(message)
                 }
             }
         }
     };
 
+    return make_json_response(
+        status,
+        payload,
+        request.version(),
+        request.keep_alive()
+    );
+}
+
+HttpRouter::Response make_method_not_allowed_response(
+    const HttpRouter::Request& request
+)
+{
     HttpRouter::Response response =
-        make_json_response(
+        make_error_response(
+            request,
             beast_http::status::method_not_allowed,
-            payload,
-            request.version(),
-            request.keep_alive()
+            "method_not_allowed",
+            "The requested HTTP method is not "
+            "supported for this route."
         );
 
     response.set(
@@ -95,27 +162,36 @@ HttpRouter::Response make_not_found_response(
     const HttpRouter::Request& request
 )
 {
-    const nlohmann::ordered_json payload = {
-        {
-            "error",
-            {
-                {
-                    "code",
-                    "not_found"
-                },
-                {
-                    "message",
-                    "The requested API route was not found."
-                }
-            }
-        }
-    };
-
-    return make_json_response(
+    return make_error_response(
+        request,
         beast_http::status::not_found,
-        payload,
-        request.version(),
-        request.keep_alive()
+        "not_found",
+        "The requested API route was not found."
+    );
+}
+
+HttpRouter::Response make_invalid_manifest_id_response(
+    const HttpRouter::Request& request
+)
+{
+    return make_error_response(
+        request,
+        beast_http::status::bad_request,
+        "invalid_manifest_id",
+        "The manifest ID must contain exactly "
+        "64 lowercase hexadecimal characters."
+    );
+}
+
+HttpRouter::Response make_manifest_not_found_response(
+    const HttpRouter::Request& request
+)
+{
+    return make_error_response(
+        request,
+        beast_http::status::not_found,
+        "manifest_not_found",
+        "The requested manifest was not found."
     );
 }
 
@@ -123,28 +199,12 @@ HttpRouter::Response make_internal_error_response(
     const HttpRouter::Request& request
 )
 {
-    const nlohmann::ordered_json payload = {
-        {
-            "error",
-            {
-                {
-                    "code",
-                    "internal_server_error"
-                },
-                {
-                    "message",
-                    "The server could not complete "
-                    "the requested operation."
-                }
-            }
-        }
-    };
-
-    return make_json_response(
+    return make_error_response(
+        request,
         beast_http::status::internal_server_error,
-        payload,
-        request.version(),
-        request.keep_alive()
+        "internal_server_error",
+        "The server could not complete "
+        "the requested operation."
     );
 }
 
@@ -175,6 +235,196 @@ HttpRouter::Response make_health_response(
     );
 }
 
+HttpRouter::Response make_files_response(
+    const HttpRouter::Request& request,
+    const app::ListFilesResult& result
+)
+{
+    nlohmann::ordered_json files =
+        nlohmann::ordered_json::array();
+
+    for (
+        const app::StoredFileSummary& file :
+        result.files
+    )
+    {
+        files.push_back(
+            {
+                {
+                    "manifest_id",
+                    file.manifest_id
+                },
+                {
+                    "filename",
+                    file.original_filename
+                },
+                {
+                    "file_size",
+                    file.file_size
+                },
+                {
+                    "chunk_size",
+                    file.configured_chunk_size
+                },
+                {
+                    "chunk_count",
+                    file.chunk_count
+                },
+                {
+                    "missing_chunks",
+                    file.missing_chunks
+                },
+                {
+                    "storage_status",
+                    file.missing_chunks == 0
+                        ? "complete"
+                        : "incomplete"
+                }
+            }
+        );
+    }
+
+    const nlohmann::ordered_json payload = {
+        {
+            "files",
+            std::move(files)
+        },
+        {
+            "summary",
+            {
+                {
+                    "stored_manifests",
+                    result.files.size()
+                },
+                {
+                    "complete_manifests",
+                    result.complete_manifests
+                },
+                {
+                    "incomplete_manifests",
+                    result.incomplete_manifests
+                }
+            }
+        }
+    };
+
+    return make_json_response(
+        beast_http::status::ok,
+        payload,
+        request.version(),
+        request.keep_alive()
+    );
+}
+
+HttpRouter::Response make_file_detail_response(
+    const HttpRouter::Request& request,
+    const app::InspectFileResult& result
+)
+{
+    nlohmann::ordered_json chunks =
+        nlohmann::ordered_json::array();
+
+    for (
+        const app::InspectedChunk& chunk :
+        result.chunks
+    )
+    {
+        chunks.push_back(
+            {
+                {
+                    "index",
+                    chunk.index
+                },
+                {
+                    "hash",
+                    chunk.hash
+                },
+                {
+                    "present",
+                    chunk.present
+                }
+            }
+        );
+    }
+
+    const nlohmann::ordered_json payload = {
+        {
+            "file",
+            {
+                {
+                    "manifest_id",
+                    result.manifest_id
+                },
+                {
+                    "filename",
+                    result.original_filename
+                },
+                {
+                    "file_size",
+                    result.file_size
+                },
+                {
+                    "chunk_size",
+                    result.configured_chunk_size
+                },
+                {
+                    "encoded_manifest_size",
+                    result.encoded_manifest_size
+                },
+                {
+                    "chunk_count",
+                    result.chunks.size()
+                },
+                {
+                    "available_chunks",
+                    result.available_chunks
+                },
+                {
+                    "missing_chunks",
+                    result.missing_chunks
+                },
+                {
+                    "storage_status",
+                    result.missing_chunks == 0
+                        ? "complete"
+                        : "incomplete"
+                }
+            }
+        },
+        {
+            "chunks",
+            std::move(chunks)
+        }
+    };
+
+    return make_json_response(
+        beast_http::status::ok,
+        payload,
+        request.version(),
+        request.keep_alive()
+    );
+}
+
+bool catalog_contains_manifest(
+    const app::ListFilesResult& catalog,
+    const std::string& manifest_id
+)
+{
+    return std::any_of(
+        catalog.files.begin(),
+        catalog.files.end(),
+        [&manifest_id](
+            const app::StoredFileSummary& file
+        )
+        {
+            return (
+                file.manifest_id ==
+                manifest_id
+            );
+        }
+    );
+}
+
 }
 
 HttpRouter::HttpRouter(
@@ -196,10 +446,10 @@ HttpRouter::Response HttpRouter::route(
     const Request& request
 ) const
 {
-    if (
-        request.target() ==
-        "/api/v1/health"
-    )
+    const std::string_view target =
+        request_target(request);
+
+    if (target == health_route)
     {
         if (
             request.method() !=
@@ -216,10 +466,7 @@ HttpRouter::Response HttpRouter::route(
         );
     }
 
-    if (
-        request.target() ==
-        "/api/v1/files"
-    )
+    if (target == files_route)
     {
         if (
             request.method() !=
@@ -233,82 +480,73 @@ HttpRouter::Response HttpRouter::route(
 
         try
         {
-            const app::ListFilesResult result =
+            return make_files_response(
+                request,
+                service_->list_files()
+            );
+        }
+        catch (const std::exception&)
+        {
+            return make_internal_error_response(
+                request
+            );
+        }
+    }
+
+    if (target.starts_with(file_detail_prefix))
+    {
+        if (
+            request.method() !=
+            beast_http::verb::get
+        )
+        {
+            return make_method_not_allowed_response(
+                request
+            );
+        }
+
+        const std::string_view manifest_id_view =
+            target.substr(
+                file_detail_prefix.size()
+            );
+
+        if (
+            !is_valid_manifest_id(
+                manifest_id_view
+            )
+        )
+        {
+            return make_invalid_manifest_id_response(
+                request
+            );
+        }
+
+        const std::string manifest_id{
+            manifest_id_view
+        };
+
+        try
+        {
+            const app::ListFilesResult catalog =
                 service_->list_files();
 
-            nlohmann::ordered_json files =
-                nlohmann::ordered_json::array();
-
-            for (
-                const app::StoredFileSummary& file :
-                result.files
+            if (
+                !catalog_contains_manifest(
+                    catalog,
+                    manifest_id
+                )
             )
             {
-                files.push_back(
-                    {
-                        {
-                            "manifest_id",
-                            file.manifest_id
-                        },
-                        {
-                            "filename",
-                            file.original_filename
-                        },
-                        {
-                            "file_size",
-                            file.file_size
-                        },
-                        {
-                            "chunk_size",
-                            file.configured_chunk_size
-                        },
-                        {
-                            "chunk_count",
-                            file.chunk_count
-                        },
-                        {
-                            "missing_chunks",
-                            file.missing_chunks
-                        },
-                        {
-                            "storage_status",
-                            file.missing_chunks == 0
-                                ? "complete"
-                                : "incomplete"
-                        }
-                    }
+                return make_manifest_not_found_response(
+                    request
                 );
             }
 
-            const nlohmann::ordered_json payload = {
-                {
-                    "files",
-                    std::move(files)
-                },
-                {
-                    "summary",
-                    {
-                        {
-                            "stored_manifests",
-                            result.files.size()
-                        },
-                        {
-                            "complete_manifests",
-                            result.complete_manifests
-                        },
-                        {
-                            "incomplete_manifests",
-                            result.incomplete_manifests
-                        }
-                    }
-                }
-            };
-
-            return make_json_response(
-                beast_http::status::ok,
-                payload,
-                request.version(),
-                request.keep_alive()
+            return make_file_detail_response(
+                request,
+                service_->inspect_file(
+                    manifest_id
+                )
             );
         }
         catch (const std::exception&)
