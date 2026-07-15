@@ -16,6 +16,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 find_package(OpenSSL REQUIRED)
 find_package(Boost CONFIG REQUIRED COMPONENTS beast)
 find_package(nlohmann_json CONFIG REQUIRED)
+find_package(Threads REQUIRED)
 
 add_library(
     nexusfs_core
@@ -23,6 +24,7 @@ add_library(
         src/app/nexusfs_service.cpp
         src/cli/command_line.cpp
         src/http/http_router.cpp
+        src/http/http_server.cpp
         src/storage/chunker.cpp
         src/storage/sha256_hasher.cpp
         src/storage/chunk_store.cpp
@@ -46,6 +48,7 @@ target_link_libraries(
         Boost::beast
     PRIVATE
         nlohmann_json::nlohmann_json
+        Threads::Threads
 )
 
 if(WIN32)
@@ -65,6 +68,17 @@ add_executable(
 
 target_link_libraries(
     nexusfs
+    PRIVATE
+        nexusfs_core
+)
+
+add_executable(
+    nexusfsd
+    src/daemon_main.cpp
+)
+
+target_link_libraries(
+    nexusfsd
     PRIVATE
         nexusfs_core
 )
@@ -151,6 +165,13 @@ if(MSVC)
             /permissive-
     )
 
+    target_compile_options(
+        nexusfsd
+        PRIVATE
+            /W4
+            /permissive-
+    )
+
     if(BUILD_TESTING)
         target_compile_options(
             nexusfs_tests
@@ -191,6 +212,14 @@ else()
 
     target_compile_options(
         nexusfs
+        PRIVATE
+            -Wall
+            -Wextra
+            -Wpedantic
+    )
+
+    target_compile_options(
+        nexusfsd
         PRIVATE
             -Wall
             -Wextra
