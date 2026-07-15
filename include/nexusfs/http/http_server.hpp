@@ -12,10 +12,10 @@ namespace nexusfs::http
 class HttpServer
 {
 public:
-    explicit HttpServer(
+    HttpServer(
         std::string address,
         std::uint16_t port,
-        HttpRouter router = HttpRouter{}
+        HttpRouter router
     );
 
     void run() const;

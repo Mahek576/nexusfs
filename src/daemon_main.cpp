@@ -1,10 +1,15 @@
+#include "nexusfs/app/nexusfs_service.hpp"
+#include "nexusfs/http/http_router.hpp"
 #include "nexusfs/http/http_server.hpp"
 
 #include <charconv>
+#include <cstddef>
 #include <cstdint>
 #include <exception>
+#include <filesystem>
 #include <iostream>
 #include <limits>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -13,6 +18,13 @@
 
 namespace
 {
+
+const std::filesystem::path storage_root{
+    "nexusfs_data"
+};
+
+constexpr std::size_t default_chunk_size =
+    1024;
 
 std::uint16_t parse_port(
     std::string_view port_text
@@ -91,9 +103,22 @@ int main(int argc, char* argv[])
                 argv[2]
             );
 
+        const auto service =
+            std::make_shared<
+                nexusfs::app::NexusFsService
+            >(
+                storage_root,
+                default_chunk_size
+            );
+
+        const nexusfs::http::HttpRouter router{
+            service
+        };
+
         const nexusfs::http::HttpServer server{
             std::move(address),
-            port
+            port,
+            router
         };
 
         server.run();
