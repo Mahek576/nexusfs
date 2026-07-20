@@ -23,6 +23,7 @@ add_library(
     STATIC
         src/app/nexusfs_service.cpp
         src/cli/command_line.cpp
+        src/daemon/daemon_configuration.cpp
         src/http/http_router.cpp
         src/http/http_server.cpp
         src/http/http_session.cpp
@@ -166,6 +167,22 @@ if(BUILD_TESTING)
         NAME nexusfs_http_upload_tests
         COMMAND nexusfs_http_upload_tests
     )
+
+    add_executable(
+        nexusfs_daemon_configuration_tests
+        tests/test_daemon_configuration.cpp
+    )
+
+    target_link_libraries(
+        nexusfs_daemon_configuration_tests
+        PRIVATE
+            nexusfs_core
+    )
+
+    add_test(
+        NAME nexusfs_daemon_configuration_tests
+        COMMAND nexusfs_daemon_configuration_tests
+    )
 endif()
 
 if(MSVC)
@@ -221,6 +238,13 @@ if(MSVC)
 
         target_compile_options(
             nexusfs_http_upload_tests
+            PRIVATE
+                /W4
+                /permissive-
+        )
+
+        target_compile_options(
+            nexusfs_daemon_configuration_tests
             PRIVATE
                 /W4
                 /permissive-
@@ -286,6 +310,14 @@ else()
 
         target_compile_options(
             nexusfs_http_upload_tests
+            PRIVATE
+                -Wall
+                -Wextra
+                -Wpedantic
+        )
+
+        target_compile_options(
+            nexusfs_daemon_configuration_tests
             PRIVATE
                 -Wall
                 -Wextra
