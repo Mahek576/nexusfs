@@ -14,45 +14,84 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 find_package(OpenSSL REQUIRED)
+find_package(Boost CONFIG REQUIRED COMPONENTS beast)
+find_package(nlohmann_json CONFIG REQUIRED)
+find_package(Threads REQUIRED)
 
-add_library(nexusfs_core STATIC
-    src/app/nexusfs_service.cpp
-    src/cli/command_line.cpp
-    src/storage/chunker.cpp
-    src/storage/sha256_hasher.cpp
-    src/storage/chunk_store.cpp
-    src/storage/file_manifest.cpp
-    src/storage/file_manifest_codec.cpp
-    src/storage/manifest_store.cpp
-    src/storage/file_reconstructor.cpp
-    src/storage/file_verifier.cpp
+add_library(
+    nexusfs_core
+    STATIC
+        src/app/nexusfs_service.cpp
+        src/cli/command_line.cpp
+        src/http/http_router.cpp
+        src/http/http_server.cpp
+        src/http/http_session.cpp
+        src/storage/chunker.cpp
+        src/storage/sha256_hasher.cpp
+        src/storage/chunk_store.cpp
+        src/storage/file_manifest.cpp
+        src/storage/file_manifest_codec.cpp
+        src/storage/manifest_store.cpp
+        src/storage/file_reconstructor.cpp
+        src/storage/file_verifier.cpp
 )
 
-target_include_directories(nexusfs_core
+target_include_directories(
+    nexusfs_core
     PUBLIC
         ${PROJECT_SOURCE_DIR}/include
 )
 
-target_link_libraries(nexusfs_core
+target_link_libraries(
+    nexusfs_core
     PUBLIC
         OpenSSL::Crypto
+        Boost::beast
+    PRIVATE
+        nlohmann_json::nlohmann_json
+        Threads::Threads
 )
 
-add_executable(nexusfs
+if(WIN32)
+    target_compile_definitions(
+        nexusfs_core
+        PUBLIC
+            _WIN32_WINNT=0x0A00
+            WIN32_LEAN_AND_MEAN
+            NOMINMAX
+    )
+endif()
+
+add_executable(
+    nexusfs
     src/main.cpp
 )
 
-target_link_libraries(nexusfs
+target_link_libraries(
+    nexusfs
+    PRIVATE
+        nexusfs_core
+)
+
+add_executable(
+    nexusfsd
+    src/daemon_main.cpp
+)
+
+target_link_libraries(
+    nexusfsd
     PRIVATE
         nexusfs_core
 )
 
 if(BUILD_TESTING)
-    add_executable(nexusfs_tests
+    add_executable(
+        nexusfs_tests
         tests/test_main.cpp
     )
 
-    target_link_libraries(nexusfs_tests
+    target_link_libraries(
+        nexusfs_tests
         PRIVATE
             nexusfs_core
     )
@@ -62,11 +101,13 @@ if(BUILD_TESTING)
         COMMAND nexusfs_tests
     )
 
-    add_executable(nexusfs_cli_tests
+    add_executable(
+        nexusfs_cli_tests
         tests/test_cli.cpp
     )
 
-    target_link_libraries(nexusfs_cli_tests
+    target_link_libraries(
+        nexusfs_cli_tests
         PRIVATE
             nexusfs_core
     )
@@ -76,11 +117,13 @@ if(BUILD_TESTING)
         COMMAND nexusfs_cli_tests
     )
 
-    add_executable(nexusfs_service_tests
+    add_executable(
+        nexusfs_service_tests
         tests/test_service.cpp
     )
 
-    target_link_libraries(nexusfs_service_tests
+    target_link_libraries(
+        nexusfs_service_tests
         PRIVATE
             nexusfs_core
     )
@@ -88,6 +131,23 @@ if(BUILD_TESTING)
     add_test(
         NAME nexusfs_service_tests
         COMMAND nexusfs_service_tests
+    )
+
+    add_executable(
+        nexusfs_http_tests
+        tests/test_http.cpp
+    )
+
+    target_link_libraries(
+        nexusfs_http_tests
+        PRIVATE
+            nexusfs_core
+            nlohmann_json::nlohmann_json
+    )
+
+    add_test(
+        NAME nexusfs_http_tests
+        COMMAND nexusfs_http_tests
     )
 endif()
 
@@ -101,6 +161,13 @@ if(MSVC)
 
     target_compile_options(
         nexusfs
+        PRIVATE
+            /W4
+            /permissive-
+    )
+
+    target_compile_options(
+        nexusfsd
         PRIVATE
             /W4
             /permissive-
@@ -123,6 +190,13 @@ if(MSVC)
 
         target_compile_options(
             nexusfs_service_tests
+            PRIVATE
+                /W4
+                /permissive-
+        )
+
+        target_compile_options(
+            nexusfs_http_tests
             PRIVATE
                 /W4
                 /permissive-
@@ -145,6 +219,14 @@ else()
             -Wpedantic
     )
 
+    target_compile_options(
+        nexusfsd
+        PRIVATE
+            -Wall
+            -Wextra
+            -Wpedantic
+    )
+
     if(BUILD_TESTING)
         target_compile_options(
             nexusfs_tests
@@ -164,6 +246,14 @@ else()
 
         target_compile_options(
             nexusfs_service_tests
+            PRIVATE
+                -Wall
+                -Wextra
+                -Wpedantic
+        )
+
+        target_compile_options(
+            nexusfs_http_tests
             PRIVATE
                 -Wall
                 -Wextra
