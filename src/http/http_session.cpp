@@ -19,7 +19,7 @@ namespace
 {
 
 constexpr std::uint64_t maximum_request_body_size =
-    1024ULL * 1024ULL;
+    64ULL * 1024ULL * 1024ULL;
 
 constexpr std::chrono::seconds session_timeout{
     30

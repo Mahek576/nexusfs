@@ -149,6 +149,23 @@ if(BUILD_TESTING)
         NAME nexusfs_http_tests
         COMMAND nexusfs_http_tests
     )
+
+    add_executable(
+        nexusfs_http_upload_tests
+        tests/test_http_upload.cpp
+    )
+
+    target_link_libraries(
+        nexusfs_http_upload_tests
+        PRIVATE
+            nexusfs_core
+            nlohmann_json::nlohmann_json
+    )
+
+    add_test(
+        NAME nexusfs_http_upload_tests
+        COMMAND nexusfs_http_upload_tests
+    )
 endif()
 
 if(MSVC)
@@ -197,6 +214,13 @@ if(MSVC)
 
         target_compile_options(
             nexusfs_http_tests
+            PRIVATE
+                /W4
+                /permissive-
+        )
+
+        target_compile_options(
+            nexusfs_http_upload_tests
             PRIVATE
                 /W4
                 /permissive-
@@ -254,6 +278,14 @@ else()
 
         target_compile_options(
             nexusfs_http_tests
+            PRIVATE
+                -Wall
+                -Wextra
+                -Wpedantic
+        )
+
+        target_compile_options(
+            nexusfs_http_upload_tests
             PRIVATE
                 -Wall
                 -Wextra

@@ -1,10 +1,18 @@
 #include "nexusfs/http/http_router.hpp"
 
+#include <boost/beast/core/string.hpp>
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
-#include <exception>
+#include <array>
+#include <atomic>
+#include <chrono>
+#include <cstddef>
+#include <cstdint>
 #include <filesystem>
+#include <fstream>
+#include <limits>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -14,6 +22,7 @@
 namespace nexusfs::http
 {
 
+namespace beast = boost::beast;
 namespace beast_http = boost::beast::http;
 
 namespace
@@ -39,16 +48,513 @@ constexpr std::string_view restore_route_suffix{
     "/restore"
 };
 
+constexpr std::string_view upload_filename_header{
+    "X-NexusFS-Filename"
+};
+
+constexpr std::string_view binary_content_type{
+    "application/octet-stream"
+};
+
+constexpr std::size_t maximum_filename_length =
+    255;
+
+std::atomic<std::uint64_t> upload_sequence{
+    0
+};
+
+class TemporaryUploadFile final
+{
+public:
+    explicit TemporaryUploadFile(
+        const std::string& filename
+    )
+        : directory_{
+            create_unique_directory()
+        }
+    {
+        try
+        {
+            file_path_ =
+                directory_
+                / filename;
+        }
+        catch (...)
+        {
+            cleanup();
+            throw;
+        }
+    }
+
+    TemporaryUploadFile(
+        const TemporaryUploadFile&
+    ) = delete;
+
+    TemporaryUploadFile& operator=(
+        const TemporaryUploadFile&
+    ) = delete;
+
+    TemporaryUploadFile(
+        TemporaryUploadFile&&
+    ) = delete;
+
+    TemporaryUploadFile& operator=(
+        TemporaryUploadFile&&
+    ) = delete;
+
+    ~TemporaryUploadFile()
+    {
+        cleanup();
+    }
+
+    void write(
+        const std::string& body
+    ) const
+    {
+        if (
+            body.size() >
+            static_cast<std::size_t>(
+                std::numeric_limits<
+                    std::streamsize
+                >::max()
+            )
+        )
+        {
+            throw std::overflow_error(
+                "Upload body exceeds the supported file size."
+            );
+        }
+
+        std::ofstream output{
+            file_path_,
+            std::ios::binary
+                | std::ios::trunc
+        };
+
+        if (!output.is_open())
+        {
+            throw std::runtime_error(
+                "Failed to create the temporary upload file."
+            );
+        }
+
+        if (!body.empty())
+        {
+            output.write(
+                body.data(),
+                static_cast<std::streamsize>(
+                    body.size()
+                )
+            );
+        }
+
+        output.flush();
+
+        if (!output)
+        {
+            throw std::runtime_error(
+                "Failed while writing the temporary upload file."
+            );
+        }
+    }
+
+    [[nodiscard]] const std::filesystem::path&
+    path() const noexcept
+    {
+        return file_path_;
+    }
+
+private:
+    static std::filesystem::path
+    create_unique_directory()
+    {
+        std::error_code temp_error;
+
+        const std::filesystem::path temp_root =
+            std::filesystem::temp_directory_path(
+                temp_error
+            );
+
+        if (temp_error)
+        {
+            throw std::runtime_error(
+                "Failed to locate the temporary directory: "
+                + temp_error.message()
+            );
+        }
+
+        const auto timestamp =
+            std::chrono::steady_clock::now()
+                .time_since_epoch()
+                .count();
+
+        for (
+            std::size_t attempt = 0;
+            attempt < 128;
+            ++attempt
+        )
+        {
+            const std::uint64_t sequence =
+                upload_sequence.fetch_add(
+                    1,
+                    std::memory_order_relaxed
+                );
+
+            const std::filesystem::path candidate =
+                temp_root
+                / (
+                    "nexusfs-upload-"
+                    + std::to_string(timestamp)
+                    + "-"
+                    + std::to_string(sequence)
+                    + "-"
+                    + std::to_string(attempt)
+                );
+
+            std::error_code create_error;
+
+            const bool created =
+                std::filesystem::create_directory(
+                    candidate,
+                    create_error
+                );
+
+            if (created)
+            {
+                return candidate;
+            }
+
+            if (
+                create_error &&
+                create_error !=
+                    std::errc::file_exists
+            )
+            {
+                throw std::runtime_error(
+                    "Failed to create a temporary upload directory: "
+                    + create_error.message()
+                );
+            }
+        }
+
+        throw std::runtime_error(
+            "Failed to allocate a unique temporary upload directory."
+        );
+    }
+
+    void cleanup() noexcept
+    {
+        if (directory_.empty())
+        {
+            return;
+        }
+
+        std::error_code cleanup_error;
+
+        std::filesystem::remove_all(
+            directory_,
+            cleanup_error
+        );
+    }
+
+    std::filesystem::path directory_;
+    std::filesystem::path file_path_;
+};
+
 std::string_view request_target(
     const HttpRouter::Request& request
 )
 {
-    const auto target = request.target();
+    const auto target =
+        request.target();
 
     return std::string_view{
         target.data(),
         target.size()
     };
+}
+
+bool is_ascii_whitespace(
+    char character
+)
+{
+    return (
+        character == ' ' ||
+        character == '\t' ||
+        character == '\r' ||
+        character == '\n'
+    );
+}
+
+std::string_view trim_ascii_whitespace(
+    std::string_view value
+)
+{
+    while (
+        !value.empty() &&
+        is_ascii_whitespace(
+            value.front()
+        )
+    )
+    {
+        value.remove_prefix(1);
+    }
+
+    while (
+        !value.empty() &&
+        is_ascii_whitespace(
+            value.back()
+        )
+    )
+    {
+        value.remove_suffix(1);
+    }
+
+    return value;
+}
+
+bool has_binary_content_type(
+    const HttpRouter::Request& request
+)
+{
+    const auto field_value =
+        request[
+            beast_http::field::content_type
+        ];
+
+    if (field_value.empty())
+    {
+        return false;
+    }
+
+    std::string_view media_type{
+        field_value.data(),
+        field_value.size()
+    };
+
+    const std::size_t parameter_position =
+        media_type.find(';');
+
+    if (
+        parameter_position !=
+        std::string_view::npos
+    )
+    {
+        media_type =
+            media_type.substr(
+                0,
+                parameter_position
+            );
+    }
+
+    media_type =
+        trim_ascii_whitespace(
+            media_type
+        );
+
+    return beast::iequals(
+        beast::string_view{
+            media_type.data(),
+            media_type.size()
+        },
+        beast::string_view{
+            binary_content_type.data(),
+            binary_content_type.size()
+        }
+    );
+}
+
+std::optional<std::string>
+read_upload_filename(
+    const HttpRouter::Request& request
+)
+{
+    const auto iterator =
+        request.find(
+            beast::string_view{
+                upload_filename_header.data(),
+                upload_filename_header.size()
+            }
+        );
+
+    if (iterator == request.end())
+    {
+        return std::nullopt;
+    }
+
+    const auto value =
+        iterator->value();
+
+    return std::string{
+        value.data(),
+        value.size()
+    };
+}
+
+std::string uppercase_ascii(
+    std::string_view value
+)
+{
+    std::string result;
+    result.reserve(
+        value.size()
+    );
+
+    for (char character : value)
+    {
+        if (
+            character >= 'a' &&
+            character <= 'z'
+        )
+        {
+            result.push_back(
+                static_cast<char>(
+                    character
+                    - 'a'
+                    + 'A'
+                )
+            );
+        }
+        else
+        {
+            result.push_back(
+                character
+            );
+        }
+    }
+
+    return result;
+}
+
+bool is_reserved_windows_filename(
+    std::string_view filename
+)
+{
+    const std::size_t extension_position =
+        filename.find('.');
+
+    const std::string_view stem =
+        filename.substr(
+            0,
+            extension_position
+        );
+
+    const std::string uppercase_stem =
+        uppercase_ascii(
+            stem
+        );
+
+    constexpr std::array<
+        std::string_view,
+        5
+    > reserved_names{
+        "CON",
+        "PRN",
+        "AUX",
+        "NUL",
+        "CLOCK$"
+    };
+
+    if (
+        std::find(
+            reserved_names.begin(),
+            reserved_names.end(),
+            uppercase_stem
+        ) != reserved_names.end()
+    )
+    {
+        return true;
+    }
+
+    if (uppercase_stem.size() == 4)
+    {
+        const bool reserved_prefix =
+            uppercase_stem.starts_with(
+                "COM"
+            ) ||
+            uppercase_stem.starts_with(
+                "LPT"
+            );
+
+        const char suffix =
+            uppercase_stem[3];
+
+        if (
+            reserved_prefix &&
+            suffix >= '1' &&
+            suffix <= '9'
+        )
+        {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+bool is_valid_upload_filename(
+    std::string_view filename
+)
+{
+    if (
+        filename.empty() ||
+        filename.size() >
+            maximum_filename_length
+    )
+    {
+        return false;
+    }
+
+    if (
+        filename == "." ||
+        filename == ".."
+    )
+    {
+        return false;
+    }
+
+    if (
+        filename.front() == ' ' ||
+        filename.back() == ' ' ||
+        filename.back() == '.'
+    )
+    {
+        return false;
+    }
+
+    constexpr std::string_view
+        invalid_characters{
+            "<>:\"/\\|?*"
+        };
+
+    for (char character : filename)
+    {
+        const auto byte =
+            static_cast<unsigned char>(
+                character
+            );
+
+        if (
+            byte < 0x20U ||
+            byte > 0x7EU
+        )
+        {
+            return false;
+        }
+
+        if (
+            invalid_characters.find(
+                character
+            ) != std::string_view::npos
+        )
+        {
+            return false;
+        }
+    }
+
+    return !is_reserved_windows_filename(
+        filename
+    );
 }
 
 bool is_valid_manifest_id(
@@ -148,7 +654,7 @@ HttpRouter::Response make_error_response(
 
 HttpRouter::Response make_method_not_allowed_response(
     const HttpRouter::Request& request,
-    std::string allowed_method
+    std::string allowed_methods
 )
 {
     HttpRouter::Response response =
@@ -162,7 +668,7 @@ HttpRouter::Response make_method_not_allowed_response(
 
     response.set(
         beast_http::field::allow,
-        std::move(allowed_method)
+        std::move(allowed_methods)
     );
 
     return response;
@@ -202,6 +708,44 @@ HttpRouter::Response make_manifest_not_found_response(
         beast_http::status::not_found,
         "manifest_not_found",
         "The requested manifest was not found."
+    );
+}
+
+HttpRouter::Response make_invalid_upload_filename_response(
+    const HttpRouter::Request& request
+)
+{
+    return make_error_response(
+        request,
+        beast_http::status::bad_request,
+        "invalid_upload_filename",
+        "X-NexusFS-Filename must contain a safe "
+        "portable filename without a directory path."
+    );
+}
+
+HttpRouter::Response make_unsupported_media_type_response(
+    const HttpRouter::Request& request
+)
+{
+    return make_error_response(
+        request,
+        beast_http::status::unsupported_media_type,
+        "unsupported_media_type",
+        "File uploads require the "
+        "application/octet-stream content type."
+    );
+}
+
+HttpRouter::Response make_upload_failed_response(
+    const HttpRouter::Request& request
+)
+{
+    return make_error_response(
+        request,
+        beast_http::status::internal_server_error,
+        "upload_failed",
+        "The uploaded file could not be stored."
     );
 }
 
@@ -376,6 +920,74 @@ HttpRouter::Response make_files_response(
 
     return make_json_response(
         beast_http::status::ok,
+        payload,
+        request.version(),
+        request.keep_alive()
+    );
+}
+
+HttpRouter::Response make_upload_response(
+    const HttpRouter::Request& request,
+    const app::StoreFileResult& result
+)
+{
+    const bool newly_created =
+        result.manifest_stored;
+
+    const nlohmann::ordered_json payload = {
+        {
+            "stored_file",
+            {
+                {
+                    "manifest_id",
+                    result.manifest_id
+                },
+                {
+                    "filename",
+                    result.original_filename
+                },
+                {
+                    "file_size",
+                    result.file_size
+                },
+                {
+                    "chunk_count",
+                    result.chunk_count
+                },
+                {
+                    "chunks_stored",
+                    result.chunks_stored
+                },
+                {
+                    "chunks_reused",
+                    result.chunks_reused
+                },
+                {
+                    "bytes_processed",
+                    result.bytes_processed
+                },
+                {
+                    "encoded_manifest_size",
+                    result.encoded_manifest_size
+                },
+                {
+                    "manifest_stored",
+                    result.manifest_stored
+                },
+                {
+                    "status",
+                    newly_created
+                        ? "stored"
+                        : "reused"
+                }
+            }
+        }
+    };
+
+    return make_json_response(
+        newly_created
+            ? beast_http::status::created
+            : beast_http::status::ok,
         payload,
         request.version(),
         request.keep_alive()
@@ -623,6 +1235,145 @@ bool catalog_contains_manifest(
     );
 }
 
+HttpRouter::Response handle_upload(
+    const HttpRouter::Request& request,
+    const app::NexusFsService& service
+)
+{
+    if (!has_binary_content_type(request))
+    {
+        return make_unsupported_media_type_response(
+            request
+        );
+    }
+
+    const std::optional<std::string> filename =
+        read_upload_filename(
+            request
+        );
+
+    if (
+        !filename.has_value() ||
+        !is_valid_upload_filename(
+            *filename
+        )
+    )
+    {
+        return make_invalid_upload_filename_response(
+            request
+        );
+    }
+
+    try
+    {
+        const TemporaryUploadFile temporary_file{
+            *filename
+        };
+
+        temporary_file.write(
+            request.body()
+        );
+
+        return make_upload_response(
+            request,
+            service.store_file(
+                temporary_file.path()
+            )
+        );
+    }
+    catch (const std::exception&)
+    {
+        return make_upload_failed_response(
+            request
+        );
+    }
+}
+
+HttpRouter::Response handle_restoration(
+    const HttpRouter::Request& request,
+    const app::NexusFsService& service,
+    const std::string& manifest_id
+)
+{
+    const nlohmann::json request_body =
+        nlohmann::json::parse(
+            request.body(),
+            nullptr,
+            false
+        );
+
+    if (
+        request_body.is_discarded() ||
+        !request_body.is_object() ||
+        !request_body.contains(
+            "output_path"
+        ) ||
+        !request_body.at(
+            "output_path"
+        ).is_string()
+    )
+    {
+        return make_invalid_request_body_response(
+            request
+        );
+    }
+
+    const std::string output_path_text =
+        request_body.at(
+            "output_path"
+        ).get<std::string>();
+
+    if (output_path_text.empty())
+    {
+        return make_invalid_request_body_response(
+            request
+        );
+    }
+
+    const std::filesystem::path output_path{
+        output_path_text
+    };
+
+    std::error_code exists_error;
+
+    const bool output_exists =
+        std::filesystem::exists(
+            output_path,
+            exists_error
+        );
+
+    if (exists_error)
+    {
+        return make_internal_error_response(
+            request
+        );
+    }
+
+    if (output_exists)
+    {
+        return make_output_path_exists_response(
+            request
+        );
+    }
+
+    try
+    {
+        return make_restoration_response(
+            request,
+            service.restore_file(
+                manifest_id,
+                output_path
+            )
+        );
+    }
+    catch (const std::exception&)
+    {
+        return make_restoration_failed_response(
+            request
+        );
+    }
+}
+
 }
 
 HttpRouter::HttpRouter(
@@ -668,29 +1419,40 @@ HttpRouter::Response HttpRouter::route(
     if (target == files_route)
     {
         if (
-            request.method() !=
+            request.method() ==
             beast_http::verb::get
         )
         {
-            return make_method_not_allowed_response(
+            try
+            {
+                return make_files_response(
+                    request,
+                    service_->list_files()
+                );
+            }
+            catch (const std::exception&)
+            {
+                return make_internal_error_response(
+                    request
+                );
+            }
+        }
+
+        if (
+            request.method() ==
+            beast_http::verb::post
+        )
+        {
+            return handle_upload(
                 request,
-                "GET"
+                *service_
             );
         }
 
-        try
-        {
-            return make_files_response(
-                request,
-                service_->list_files()
-            );
-        }
-        catch (const std::exception&)
-        {
-            return make_internal_error_response(
-                request
-            );
-        }
+        return make_method_not_allowed_response(
+            request,
+            "GET, POST"
+        );
     }
 
     if (target.starts_with(file_route_prefix))
@@ -769,6 +1531,16 @@ HttpRouter::Response HttpRouter::route(
         }
 
         if (
+            remaining_target.find('/') !=
+            std::string_view::npos
+        )
+        {
+            return make_not_found_response(
+                request
+            );
+        }
+
+        if (
             !is_valid_manifest_id(
                 remaining_target
             )
@@ -822,83 +1594,11 @@ HttpRouter::Response HttpRouter::route(
 
             if (is_restore_route)
             {
-                const nlohmann::json request_body =
-                    nlohmann::json::parse(
-                        request.body(),
-                        nullptr,
-                        false
-                    );
-
-                if (
-                    request_body.is_discarded() ||
-                    !request_body.is_object() ||
-                    !request_body.contains(
-                        "output_path"
-                    ) ||
-                    !request_body.at(
-                        "output_path"
-                    ).is_string()
-                )
-                {
-                    return make_invalid_request_body_response(
-                        request
-                    );
-                }
-
-                const std::string output_path_text =
-                    request_body.at(
-                        "output_path"
-                    ).get<std::string>();
-
-                if (output_path_text.empty())
-                {
-                    return make_invalid_request_body_response(
-                        request
-                    );
-                }
-
-                const std::filesystem::path output_path{
-                    output_path_text
-                };
-
-                std::error_code exists_error;
-
-                const bool output_exists =
-                    std::filesystem::exists(
-                        output_path,
-                        exists_error
-                    );
-
-                if (exists_error)
-                {
-                    return make_internal_error_response(
-                        request
-                    );
-                }
-
-                if (output_exists)
-                {
-                    return make_output_path_exists_response(
-                        request
-                    );
-                }
-
-                try
-                {
-                    return make_restoration_response(
-                        request,
-                        service_->restore_file(
-                            manifest_id,
-                            output_path
-                        )
-                    );
-                }
-                catch (const std::exception&)
-                {
-                    return make_restoration_failed_response(
-                        request
-                    );
-                }
+                return handle_restoration(
+                    request,
+                    *service_,
+                    manifest_id
+                );
             }
 
             return make_file_detail_response(
