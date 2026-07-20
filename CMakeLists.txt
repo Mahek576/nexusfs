@@ -183,6 +183,29 @@ if(BUILD_TESTING)
         NAME nexusfs_daemon_configuration_tests
         COMMAND nexusfs_daemon_configuration_tests
     )
+
+    add_executable(
+        nexusfs_http_server_lifecycle_tests
+        tests/test_http_server_lifecycle.cpp
+    )
+
+    target_link_libraries(
+        nexusfs_http_server_lifecycle_tests
+        PRIVATE
+            nexusfs_core
+            Threads::Threads
+    )
+
+    add_test(
+        NAME nexusfs_http_server_lifecycle_tests
+        COMMAND nexusfs_http_server_lifecycle_tests
+    )
+
+    set_tests_properties(
+        nexusfs_http_server_lifecycle_tests
+        PROPERTIES
+            TIMEOUT 30
+    )
 endif()
 
 if(MSVC)
@@ -245,6 +268,13 @@ if(MSVC)
 
         target_compile_options(
             nexusfs_daemon_configuration_tests
+            PRIVATE
+                /W4
+                /permissive-
+        )
+
+        target_compile_options(
+            nexusfs_http_server_lifecycle_tests
             PRIVATE
                 /W4
                 /permissive-
@@ -318,6 +348,14 @@ else()
 
         target_compile_options(
             nexusfs_daemon_configuration_tests
+            PRIVATE
+                -Wall
+                -Wextra
+                -Wpedantic
+        )
+
+        target_compile_options(
+            nexusfs_http_server_lifecycle_tests
             PRIVATE
                 -Wall
                 -Wextra

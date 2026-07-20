@@ -25,6 +25,38 @@ constexpr std::chrono::seconds session_timeout{
     30
 };
 
+bool is_shutdown_error(
+    const boost::system::error_code& error
+)
+{
+    return (
+        error == boost::asio::error::operation_aborted ||
+        error == boost::asio::error::bad_descriptor ||
+        error == boost::asio::error::not_connected ||
+        error == boost::asio::error::connection_aborted
+    );
+}
+
+void close_socket(
+    boost::beast::tcp_stream& stream
+) noexcept
+{
+    boost::system::error_code ignored_error;
+
+    stream.socket().cancel(
+        ignored_error
+    );
+
+    stream.socket().shutdown(
+        boost::asio::ip::tcp::socket::shutdown_both,
+        ignored_error
+    );
+
+    stream.socket().close(
+        ignored_error
+    );
+}
+
 }
 
 HttpSession::HttpSession(
@@ -36,11 +68,20 @@ HttpSession::HttpSession(
 {
 }
 
+HttpSession::~HttpSession()
+{
+    stop();
+}
+
 void HttpSession::run()
 {
     boost::beast::flat_buffer buffer;
 
-    for (;;)
+    while (
+        !stop_requested_.load(
+            std::memory_order_acquire
+        )
+    )
     {
         beast_http::request_parser<
             beast_http::string_body
@@ -73,16 +114,39 @@ void HttpSession::run()
 
         if (read_error)
         {
+            if (
+                stop_requested_.load(
+                    std::memory_order_acquire
+                ) &&
+                is_shutdown_error(
+                    read_error
+                )
+            )
+            {
+                break;
+            }
+
             throw boost::system::system_error{
                 read_error
             };
+        }
+
+        if (
+            stop_requested_.load(
+                std::memory_order_acquire
+            )
+        )
+        {
+            break;
         }
 
         HttpRouter::Request request =
             parser.release();
 
         HttpRouter::Response response =
-            router_.route(request);
+            router_.route(
+                request
+            );
 
         const bool should_close =
             response.need_eof();
@@ -101,6 +165,18 @@ void HttpSession::run()
 
         if (write_error)
         {
+            if (
+                stop_requested_.load(
+                    std::memory_order_acquire
+                ) &&
+                is_shutdown_error(
+                    write_error
+                )
+            )
+            {
+                break;
+            }
+
             throw boost::system::system_error{
                 write_error
             };
@@ -112,23 +188,34 @@ void HttpSession::run()
         }
     }
 
-    boost::system::error_code shutdown_error;
-
-    stream_.socket().shutdown(
-        boost::asio::ip::tcp::socket::shutdown_send,
-        shutdown_error
+    close_socket(
+        stream_
     );
+}
 
-    if (
-        shutdown_error &&
-        shutdown_error !=
-            boost::asio::error::not_connected
-    )
+void HttpSession::stop() noexcept
+{
+    const bool already_requested =
+        stop_requested_.exchange(
+            true,
+            std::memory_order_acq_rel
+        );
+
+    if (already_requested)
     {
-        throw boost::system::system_error{
-            shutdown_error
-        };
+        return;
     }
+
+    close_socket(
+        stream_
+    );
+}
+
+bool HttpSession::stop_requested() const noexcept
+{
+    return stop_requested_.load(
+        std::memory_order_acquire
+    );
 }
 
 }
