@@ -3,13 +3,59 @@
 #include "nexusfs/http/http_router.hpp"
 #include "nexusfs/http/http_server.hpp"
 
+#include <boost/asio/io_context.hpp>
+#include <boost/asio/signal_set.hpp>
+#include <boost/system/error_code.hpp>
+
+#include <csignal>
+#include <cstddef>
 #include <exception>
 #include <iomanip>
 #include <iostream>
 #include <memory>
 #include <stdexcept>
-#include <utility>
+#include <thread>
 #include <vector>
+
+namespace
+{
+
+void register_shutdown_signals(
+    boost::asio::signal_set& signals
+)
+{
+    signals.add(
+        SIGINT
+    );
+
+    signals.add(
+        SIGTERM
+    );
+
+#ifdef SIGBREAK
+    /*
+     * Windows generates SIGBREAK for Ctrl + Break.
+     */
+    signals.add(
+        SIGBREAK
+    );
+#endif
+}
+
+void stop_signal_context(
+    boost::asio::io_context& signal_context,
+    std::thread& signal_thread
+) noexcept
+{
+    signal_context.stop();
+
+    if (signal_thread.joinable())
+    {
+        signal_thread.join();
+    }
+}
+
+}
 
 int main(
     int argc,
@@ -87,13 +133,79 @@ int main(
             service
         };
 
-        const nexusfs::http::HttpServer server{
+        nexusfs::http::HttpServer server{
             configuration.address,
             configuration.port,
             router
         };
 
-        server.run();
+        boost::asio::io_context signal_context{
+            1
+        };
+
+        boost::asio::signal_set signals{
+            signal_context
+        };
+
+        register_shutdown_signals(
+            signals
+        );
+
+        signals.async_wait(
+            [
+                &server
+            ](
+                const boost::system::error_code& error,
+                int signal_number
+            )
+            {
+                if (error)
+                {
+                    return;
+                }
+
+                std::cout
+                    << "\nNexusFS daemon received "
+                    << "shutdown signal "
+                    << signal_number
+                    << ".\n";
+
+                server.stop();
+            }
+        );
+
+        std::thread signal_thread{
+            [
+                &signal_context
+            ]()
+            {
+                signal_context.run();
+            }
+        };
+
+        try
+        {
+            server.run();
+        }
+        catch (...)
+        {
+            server.stop();
+
+            stop_signal_context(
+                signal_context,
+                signal_thread
+            );
+
+            throw;
+        }
+
+        stop_signal_context(
+            signal_context,
+            signal_thread
+        );
+
+        std::cout
+            << "NexusFS daemon stopped cleanly.\n";
 
         return 0;
     }
