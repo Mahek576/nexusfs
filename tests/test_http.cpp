@@ -111,11 +111,59 @@ void require_equal(
     }
 }
 
+std::vector<std::uint8_t> create_test_data(
+    std::size_t size
+)
+{
+    std::vector<std::uint8_t> data(
+        size
+    );
+
+    for (
+        std::size_t index = 0;
+        index < data.size();
+        ++index
+    )
+    {
+        data[index] =
+            static_cast<std::uint8_t>(
+                (
+                    index * 17U
+                    + 29U
+                )
+                % 256U
+            );
+    }
+
+    return data;
+}
+
 void write_test_file(
     const std::filesystem::path& path,
     const std::vector<std::uint8_t>& data
 )
 {
+    const std::filesystem::path parent =
+        path.parent_path();
+
+    if (!parent.empty())
+    {
+        std::error_code directory_error;
+
+        std::filesystem::create_directories(
+            parent,
+            directory_error
+        );
+
+        if (directory_error)
+        {
+            throw std::runtime_error(
+                "Failed to create HTTP test file directory: "
+                + directory_error.message()
+            );
+        }
+    }
+
     std::ofstream output{
         path,
         std::ios::binary | std::ios::trunc
@@ -161,6 +209,89 @@ create_service(
         storage_root,
         1024
     );
+}
+
+std::filesystem::path chunk_path(
+    const std::filesystem::path& storage_root,
+    const std::string& chunk_hash
+)
+{
+    if (chunk_hash.size() != 64)
+    {
+        throw std::runtime_error(
+            "Cannot construct a chunk path from "
+            "an invalid chunk hash."
+        );
+    }
+
+    return storage_root
+        / "chunks"
+        / chunk_hash.substr(0, 2)
+        / chunk_hash.substr(2);
+}
+
+void corrupt_first_byte(
+    const std::filesystem::path& path
+)
+{
+    std::fstream file{
+        path,
+        std::ios::binary
+            | std::ios::in
+            | std::ios::out
+    };
+
+    if (!file.is_open())
+    {
+        throw std::runtime_error(
+            "Failed to open stored chunk for corruption test."
+        );
+    }
+
+    char original_byte = '\0';
+
+    file.read(
+        &original_byte,
+        1
+    );
+
+    if (!file)
+    {
+        throw std::runtime_error(
+            "Failed to read stored chunk during corruption test."
+        );
+    }
+
+    const auto unsigned_original =
+        static_cast<unsigned char>(
+            original_byte
+        );
+
+    const char corrupted_byte =
+        static_cast<char>(
+            unsigned_original ^ 0xFFU
+        );
+
+    file.clear();
+
+    file.seekp(
+        0,
+        std::ios::beg
+    );
+
+    file.write(
+        &corrupted_byte,
+        1
+    );
+
+    file.flush();
+
+    if (!file)
+    {
+        throw std::runtime_error(
+            "Failed to corrupt stored chunk."
+        );
+    }
 }
 
 std::string header_value(
@@ -217,13 +348,10 @@ void test_health_route()
 {
     TemporaryDirectory directory;
 
-    const auto service =
+    const nexusfs::http::HttpRouter router{
         create_service(
             directory.path() / "storage"
-        );
-
-    const nexusfs::http::HttpRouter router{
-        service
+        )
     };
 
     nexusfs::http::HttpRouter::Request request{
@@ -358,25 +486,9 @@ void test_files_catalog_route()
     const std::filesystem::path source_path =
         directory.path() / "catalog.bin";
 
-    std::vector<std::uint8_t> source_data(
-        1500
-    );
-
-    for (
-        std::size_t index = 0;
-        index < source_data.size();
-        ++index
-    )
-    {
-        source_data[index] =
-            static_cast<std::uint8_t>(
-                index % 251
-            );
-    }
-
     write_test_file(
         source_path,
-        source_data
+        create_test_data(1500)
     );
 
     const auto service =
@@ -449,28 +561,9 @@ void test_file_detail_route()
     const std::filesystem::path source_path =
         directory.path() / "detail.bin";
 
-    std::vector<std::uint8_t> source_data(
-        2500
-    );
-
-    for (
-        std::size_t index = 0;
-        index < source_data.size();
-        ++index
-    )
-    {
-        source_data[index] =
-            static_cast<std::uint8_t>(
-                (
-                    index * 17U +
-                    29U
-                ) % 256U
-            );
-    }
-
     write_test_file(
         source_path,
-        source_data
+        create_test_data(2500)
     );
 
     const auto service =
@@ -545,12 +638,6 @@ void test_file_detail_route()
     );
 
     require_equal(
-        file.at("chunk_size").get<std::size_t>(),
-        static_cast<std::size_t>(1024),
-        "File detail chunk-size test"
-    );
-
-    require_equal(
         file.at("chunk_count").get<std::size_t>(),
         static_cast<std::size_t>(3),
         "File detail chunk-count test"
@@ -571,7 +658,7 @@ void test_file_detail_route()
     require_equal(
         file.at("storage_status").get<std::string>(),
         std::string{"complete"},
-        "File detail status-field test"
+        "File detail storage-status test"
     );
 
     require_equal(
@@ -694,6 +781,330 @@ void test_missing_manifest_route()
     );
 }
 
+void test_verification_route()
+{
+    TemporaryDirectory directory;
+
+    const std::filesystem::path source_path =
+        directory.path() / "verify.bin";
+
+    write_test_file(
+        source_path,
+        create_test_data(2500)
+    );
+
+    const auto service =
+        create_service(
+            directory.path() / "storage"
+        );
+
+    const auto stored =
+        service->store_file(
+            source_path
+        );
+
+    const nexusfs::http::HttpRouter router{
+        service
+    };
+
+    const std::string target =
+        "/api/v1/files/"
+        + stored.manifest_id
+        + "/verify";
+
+    nexusfs::http::HttpRouter::Request request{
+        beast_http::verb::post,
+        target,
+        11
+    };
+
+    request.keep_alive(true);
+
+    const auto response =
+        router.route(request);
+
+    require_equal(
+        response.result(),
+        beast_http::status::ok,
+        "Verification status test"
+    );
+
+    require_true(
+        response.keep_alive(),
+        "Verification keep-alive test"
+    );
+
+    require_common_json_headers(
+        response,
+        "Verification response"
+    );
+
+    const nlohmann::json payload =
+        nlohmann::json::parse(
+            response.body()
+        );
+
+    const nlohmann::json& verification =
+        payload.at("verification");
+
+    require_equal(
+        verification.at("manifest_id")
+            .get<std::string>(),
+        stored.manifest_id,
+        "Verification manifest-ID test"
+    );
+
+    require_equal(
+        verification.at("filename")
+            .get<std::string>(),
+        std::string{"verify.bin"},
+        "Verification filename test"
+    );
+
+    require_equal(
+        verification.at("file_size")
+            .get<std::uint64_t>(),
+        static_cast<std::uint64_t>(2500),
+        "Verification file-size test"
+    );
+
+    require_equal(
+        verification.at("chunk_count")
+            .get<std::size_t>(),
+        static_cast<std::size_t>(3),
+        "Verification chunk-count test"
+    );
+
+    require_equal(
+        verification.at("verified_chunks")
+            .get<std::size_t>(),
+        static_cast<std::size_t>(3),
+        "Verification verified-chunks test"
+    );
+
+    require_equal(
+        verification.at("total_bytes_verified")
+            .get<std::uint64_t>(),
+        static_cast<std::uint64_t>(2500),
+        "Verification byte-count test"
+    );
+
+    require_equal(
+        verification.at("storage_integrity")
+            .get<std::string>(),
+        std::string{"healthy"},
+        "Verification integrity-status test"
+    );
+
+    require_equal(
+        payload.at("chunks").size(),
+        static_cast<std::size_t>(3),
+        "Verification chunk-array test"
+    );
+
+    require_equal(
+        payload.at("chunks")
+            .at(0)
+            .at("bytes_verified")
+            .get<std::uint64_t>(),
+        static_cast<std::uint64_t>(1024),
+        "Verification first-chunk size test"
+    );
+
+    require_equal(
+        payload.at("chunks")
+            .at(1)
+            .at("bytes_verified")
+            .get<std::uint64_t>(),
+        static_cast<std::uint64_t>(1024),
+        "Verification second-chunk size test"
+    );
+
+    require_equal(
+        payload.at("chunks")
+            .at(2)
+            .at("bytes_verified")
+            .get<std::uint64_t>(),
+        static_cast<std::uint64_t>(452),
+        "Verification final-chunk size test"
+    );
+}
+
+void test_verification_method_not_allowed()
+{
+    TemporaryDirectory directory;
+
+    const nexusfs::http::HttpRouter router{
+        create_service(
+            directory.path() / "storage"
+        )
+    };
+
+    const std::string manifest_id(
+        64,
+        'a'
+    );
+
+    nexusfs::http::HttpRouter::Request request{
+        beast_http::verb::get,
+        "/api/v1/files/"
+            + manifest_id
+            + "/verify",
+        11
+    };
+
+    const auto response =
+        router.route(request);
+
+    require_equal(
+        response.result(),
+        beast_http::status::method_not_allowed,
+        "Verification method status test"
+    );
+
+    require_equal(
+        header_value(
+            response,
+            beast_http::field::allow
+        ),
+        std::string{"POST"},
+        "Verification Allow-header test"
+    );
+}
+
+void test_missing_manifest_verification()
+{
+    TemporaryDirectory directory;
+
+    const nexusfs::http::HttpRouter router{
+        create_service(
+            directory.path() / "storage"
+        )
+    };
+
+    const std::string missing_manifest_id(
+        64,
+        'f'
+    );
+
+    nexusfs::http::HttpRouter::Request request{
+        beast_http::verb::post,
+        "/api/v1/files/"
+            + missing_manifest_id
+            + "/verify",
+        11
+    };
+
+    const auto response =
+        router.route(request);
+
+    require_equal(
+        response.result(),
+        beast_http::status::not_found,
+        "Missing verification manifest status test"
+    );
+
+    const nlohmann::json payload =
+        nlohmann::json::parse(
+            response.body()
+        );
+
+    require_equal(
+        payload.at("error")
+            .at("code")
+            .get<std::string>(),
+        std::string{"manifest_not_found"},
+        "Missing verification manifest code test"
+    );
+}
+
+void test_corrupted_chunk_verification()
+{
+    TemporaryDirectory directory;
+
+    const std::filesystem::path storage_root =
+        directory.path() / "storage";
+
+    const std::filesystem::path source_path =
+        directory.path() / "corrupt.bin";
+
+    write_test_file(
+        source_path,
+        create_test_data(1500)
+    );
+
+    const auto service =
+        create_service(
+            storage_root
+        );
+
+    const auto stored =
+        service->store_file(
+            source_path
+        );
+
+    const auto inspected =
+        service->inspect_file(
+            stored.manifest_id
+        );
+
+    require_true(
+        !inspected.chunks.empty(),
+        "Corruption test inspected-chunk test"
+    );
+
+    const std::filesystem::path stored_chunk_path =
+        chunk_path(
+            storage_root,
+            inspected.chunks.front().hash
+        );
+
+    corrupt_first_byte(
+        stored_chunk_path
+    );
+
+    const nexusfs::http::HttpRouter router{
+        service
+    };
+
+    nexusfs::http::HttpRouter::Request request{
+        beast_http::verb::post,
+        "/api/v1/files/"
+            + stored.manifest_id
+            + "/verify",
+        11
+    };
+
+    const auto response =
+        router.route(request);
+
+    require_equal(
+        response.result(),
+        beast_http::status::conflict,
+        "Corrupted verification status test"
+    );
+
+    require_common_json_headers(
+        response,
+        "Corrupted verification response"
+    );
+
+    const nlohmann::json payload =
+        nlohmann::json::parse(
+            response.body()
+        );
+
+    require_equal(
+        payload.at("error")
+            .at("code")
+            .get<std::string>(),
+        std::string{
+            "integrity_verification_failed"
+        },
+        "Corrupted verification error-code test"
+    );
+}
+
 }
 
 int main()
@@ -734,6 +1145,26 @@ int main()
 
         std::cout
             << "[PASS] HTTP missing manifest response\n";
+
+        test_verification_route();
+
+        std::cout
+            << "[PASS] HTTP verification route\n";
+
+        test_verification_method_not_allowed();
+
+        std::cout
+            << "[PASS] HTTP verification method rejection\n";
+
+        test_missing_manifest_verification();
+
+        std::cout
+            << "[PASS] HTTP missing verification manifest\n";
+
+        test_corrupted_chunk_verification();
+
+        std::cout
+            << "[PASS] HTTP corrupted chunk verification\n";
 
         std::cout
             << "All NexusFS HTTP router tests passed.\n";

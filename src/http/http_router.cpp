@@ -25,8 +25,12 @@ constexpr std::string_view files_route{
     "/api/v1/files"
 };
 
-constexpr std::string_view file_detail_prefix{
+constexpr std::string_view file_route_prefix{
     "/api/v1/files/"
+};
+
+constexpr std::string_view verify_route_suffix{
+    "/verify"
 };
 
 std::string_view request_target(
@@ -138,7 +142,8 @@ HttpRouter::Response make_error_response(
 }
 
 HttpRouter::Response make_method_not_allowed_response(
-    const HttpRouter::Request& request
+    const HttpRouter::Request& request,
+    std::string allowed_method
 )
 {
     HttpRouter::Response response =
@@ -152,7 +157,7 @@ HttpRouter::Response make_method_not_allowed_response(
 
     response.set(
         beast_http::field::allow,
-        "GET"
+        std::move(allowed_method)
     );
 
     return response;
@@ -192,6 +197,20 @@ HttpRouter::Response make_manifest_not_found_response(
         beast_http::status::not_found,
         "manifest_not_found",
         "The requested manifest was not found."
+    );
+}
+
+HttpRouter::Response
+make_integrity_verification_failed_response(
+    const HttpRouter::Request& request
+)
+{
+    return make_error_response(
+        request,
+        beast_http::status::conflict,
+        "integrity_verification_failed",
+        "One or more stored chunks failed "
+        "integrity verification."
     );
 }
 
@@ -405,6 +424,85 @@ HttpRouter::Response make_file_detail_response(
     );
 }
 
+HttpRouter::Response make_verification_response(
+    const HttpRouter::Request& request,
+    const app::VerifyFileResult& result
+)
+{
+    nlohmann::ordered_json chunks =
+        nlohmann::ordered_json::array();
+
+    for (
+        const app::VerifiedChunkResult& chunk :
+        result.verified_chunks
+    )
+    {
+        chunks.push_back(
+            {
+                {
+                    "index",
+                    chunk.index
+                },
+                {
+                    "hash",
+                    chunk.hash
+                },
+                {
+                    "bytes_verified",
+                    chunk.bytes_verified
+                }
+            }
+        );
+    }
+
+    const nlohmann::ordered_json payload = {
+        {
+            "verification",
+            {
+                {
+                    "manifest_id",
+                    result.manifest_id
+                },
+                {
+                    "filename",
+                    result.original_filename
+                },
+                {
+                    "file_size",
+                    result.file_size
+                },
+                {
+                    "chunk_count",
+                    result.chunk_count
+                },
+                {
+                    "verified_chunks",
+                    result.verified_chunks.size()
+                },
+                {
+                    "total_bytes_verified",
+                    result.total_bytes_verified
+                },
+                {
+                    "storage_integrity",
+                    "healthy"
+                }
+            }
+        },
+        {
+            "chunks",
+            std::move(chunks)
+        }
+    };
+
+    return make_json_response(
+        beast_http::status::ok,
+        payload,
+        request.version(),
+        request.keep_alive()
+    );
+}
+
 bool catalog_contains_manifest(
     const app::ListFilesResult& catalog,
     const std::string& manifest_id
@@ -457,7 +555,8 @@ HttpRouter::Response HttpRouter::route(
         )
         {
             return make_method_not_allowed_response(
-                request
+                request,
+                "GET"
             );
         }
 
@@ -474,7 +573,8 @@ HttpRouter::Response HttpRouter::route(
         )
         {
             return make_method_not_allowed_response(
-                request
+                request,
+                "GET"
             );
         }
 
@@ -493,26 +593,52 @@ HttpRouter::Response HttpRouter::route(
         }
     }
 
-    if (target.starts_with(file_detail_prefix))
+    if (target.starts_with(file_route_prefix))
     {
-        if (
-            request.method() !=
-            beast_http::verb::get
-        )
-        {
-            return make_method_not_allowed_response(
-                request
-            );
-        }
-
-        const std::string_view manifest_id_view =
+        std::string_view remaining_target =
             target.substr(
-                file_detail_prefix.size()
+                file_route_prefix.size()
             );
+
+        const bool is_verify_route =
+            remaining_target.ends_with(
+                verify_route_suffix
+            );
+
+        if (is_verify_route)
+        {
+            remaining_target.remove_suffix(
+                verify_route_suffix.size()
+            );
+
+            if (
+                request.method() !=
+                beast_http::verb::post
+            )
+            {
+                return make_method_not_allowed_response(
+                    request,
+                    "POST"
+                );
+            }
+        }
+        else
+        {
+            if (
+                request.method() !=
+                beast_http::verb::get
+            )
+            {
+                return make_method_not_allowed_response(
+                    request,
+                    "GET"
+                );
+            }
+        }
 
         if (
             !is_valid_manifest_id(
-                manifest_id_view
+                remaining_target
             )
         )
         {
@@ -522,7 +648,7 @@ HttpRouter::Response HttpRouter::route(
         }
 
         const std::string manifest_id{
-            manifest_id_view
+            remaining_target
         };
 
         try
@@ -540,6 +666,26 @@ HttpRouter::Response HttpRouter::route(
                 return make_manifest_not_found_response(
                     request
                 );
+            }
+
+            if (is_verify_route)
+            {
+                try
+                {
+                    return make_verification_response(
+                        request,
+                        service_->verify_file(
+                            manifest_id
+                        )
+                    );
+                }
+                catch (const std::exception&)
+                {
+                    return
+                        make_integrity_verification_failed_response(
+                            request
+                        );
+                }
             }
 
             return make_file_detail_response(
