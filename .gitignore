@@ -8,3 +8,4 @@ build/
 nexusfs_data/
 reconstructed/
 restored_cli/
+restored_api/

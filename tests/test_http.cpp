@@ -172,7 +172,7 @@ void write_test_file(
     if (!output.is_open())
     {
         throw std::runtime_error(
-            "Failed to create HTTP test source file."
+            "Failed to create HTTP test file."
         );
     }
 
@@ -193,9 +193,73 @@ void write_test_file(
     if (!output)
     {
         throw std::runtime_error(
-            "Failed while writing HTTP test source file."
+            "Failed while writing HTTP test file."
         );
     }
+}
+
+std::vector<std::uint8_t> read_test_file(
+    const std::filesystem::path& path
+)
+{
+    std::ifstream input{
+        path,
+        std::ios::binary
+    };
+
+    if (!input.is_open())
+    {
+        throw std::runtime_error(
+            "Failed to open restored HTTP test file."
+        );
+    }
+
+    input.seekg(
+        0,
+        std::ios::end
+    );
+
+    const std::streampos end_position =
+        input.tellg();
+
+    if (end_position < 0)
+    {
+        throw std::runtime_error(
+            "Failed to determine restored file size."
+        );
+    }
+
+    input.seekg(
+        0,
+        std::ios::beg
+    );
+
+    std::vector<std::uint8_t> data(
+        static_cast<std::size_t>(
+            end_position
+        )
+    );
+
+    if (!data.empty())
+    {
+        input.read(
+            reinterpret_cast<char*>(
+                data.data()
+            ),
+            static_cast<std::streamsize>(
+                data.size()
+            )
+        );
+    }
+
+    if (!input && !data.empty())
+    {
+        throw std::runtime_error(
+            "Failed while reading restored HTTP test file."
+        );
+    }
+
+    return data;
 }
 
 std::shared_ptr<nexusfs::app::NexusFsService>
@@ -1053,14 +1117,11 @@ void test_corrupted_chunk_verification()
         "Corruption test inspected-chunk test"
     );
 
-    const std::filesystem::path stored_chunk_path =
+    corrupt_first_byte(
         chunk_path(
             storage_root,
             inspected.chunks.front().hash
-        );
-
-    corrupt_first_byte(
-        stored_chunk_path
+        )
     );
 
     const nexusfs::http::HttpRouter router{
@@ -1102,6 +1163,547 @@ void test_corrupted_chunk_verification()
             "integrity_verification_failed"
         },
         "Corrupted verification error-code test"
+    );
+}
+
+void test_restoration_route()
+{
+    TemporaryDirectory directory;
+
+    const std::filesystem::path storage_root =
+        directory.path() / "storage";
+
+    const std::filesystem::path source_path =
+        directory.path()
+        / "source"
+        / "restore.bin";
+
+    const std::filesystem::path output_path =
+        directory.path()
+        / "restored"
+        / "restore.bin";
+
+    const std::vector<std::uint8_t> source_data =
+        create_test_data(
+            2500
+        );
+
+    write_test_file(
+        source_path,
+        source_data
+    );
+
+    const auto service =
+        create_service(
+            storage_root
+        );
+
+    const auto stored =
+        service->store_file(
+            source_path
+        );
+
+    const nexusfs::http::HttpRouter router{
+        service
+    };
+
+    nexusfs::http::HttpRouter::Request request{
+        beast_http::verb::post,
+        "/api/v1/files/"
+            + stored.manifest_id
+            + "/restore",
+        11
+    };
+
+    request.set(
+        beast_http::field::content_type,
+        "application/json"
+    );
+
+    request.body() =
+        nlohmann::json{
+            {
+                "output_path",
+                output_path.string()
+            }
+        }.dump();
+
+    request.prepare_payload();
+    request.keep_alive(true);
+
+    const auto response =
+        router.route(request);
+
+    require_equal(
+        response.result(),
+        beast_http::status::created,
+        "Restoration status test"
+    );
+
+    require_true(
+        response.keep_alive(),
+        "Restoration keep-alive test"
+    );
+
+    require_common_json_headers(
+        response,
+        "Restoration response"
+    );
+
+    const nlohmann::json payload =
+        nlohmann::json::parse(
+            response.body()
+        );
+
+    const nlohmann::json& restoration =
+        payload.at("restoration");
+
+    require_equal(
+        restoration.at("manifest_id")
+            .get<std::string>(),
+        stored.manifest_id,
+        "Restoration manifest-ID test"
+    );
+
+    require_equal(
+        restoration.at("filename")
+            .get<std::string>(),
+        std::string{"restore.bin"},
+        "Restoration filename test"
+    );
+
+    require_equal(
+        restoration.at("file_size")
+            .get<std::uint64_t>(),
+        static_cast<std::uint64_t>(2500),
+        "Restoration file-size test"
+    );
+
+    require_equal(
+        restoration.at("chunk_count")
+            .get<std::size_t>(),
+        static_cast<std::size_t>(3),
+        "Restoration chunk-count test"
+    );
+
+    require_equal(
+        restoration.at("output_path")
+            .get<std::string>(),
+        output_path.string(),
+        "Restoration output-path test"
+    );
+
+    require_equal(
+        restoration.at("bytes_written")
+            .get<std::uint64_t>(),
+        static_cast<std::uint64_t>(2500),
+        "Restoration bytes-written test"
+    );
+
+    require_equal(
+        restoration.at("chunks_loaded")
+            .get<std::size_t>(),
+        static_cast<std::size_t>(3),
+        "Restoration chunks-loaded test"
+    );
+
+    require_equal(
+        restoration.at("status")
+            .get<std::string>(),
+        std::string{"restored"},
+        "Restoration result-status test"
+    );
+
+    require_true(
+        std::filesystem::exists(
+            output_path
+        ),
+        "Restoration output existence test"
+    );
+
+    require_equal(
+        read_test_file(
+            output_path
+        ),
+        source_data,
+        "Restoration byte-perfect output test"
+    );
+}
+
+void test_restoration_method_not_allowed()
+{
+    TemporaryDirectory directory;
+
+    const nexusfs::http::HttpRouter router{
+        create_service(
+            directory.path() / "storage"
+        )
+    };
+
+    const std::string manifest_id(
+        64,
+        'a'
+    );
+
+    nexusfs::http::HttpRouter::Request request{
+        beast_http::verb::get,
+        "/api/v1/files/"
+            + manifest_id
+            + "/restore",
+        11
+    };
+
+    const auto response =
+        router.route(request);
+
+    require_equal(
+        response.result(),
+        beast_http::status::method_not_allowed,
+        "Restoration method status test"
+    );
+
+    require_equal(
+        header_value(
+            response,
+            beast_http::field::allow
+        ),
+        std::string{"POST"},
+        "Restoration Allow-header test"
+    );
+}
+
+void test_invalid_restoration_body()
+{
+    TemporaryDirectory directory;
+
+    const std::filesystem::path source_path =
+        directory.path() / "invalid-body.bin";
+
+    write_test_file(
+        source_path,
+        create_test_data(1200)
+    );
+
+    const auto service =
+        create_service(
+            directory.path() / "storage"
+        );
+
+    const auto stored =
+        service->store_file(
+            source_path
+        );
+
+    const nexusfs::http::HttpRouter router{
+        service
+    };
+
+    nexusfs::http::HttpRouter::Request request{
+        beast_http::verb::post,
+        "/api/v1/files/"
+            + stored.manifest_id
+            + "/restore",
+        11
+    };
+
+    request.set(
+        beast_http::field::content_type,
+        "application/json"
+    );
+
+    request.body() = "{}";
+    request.prepare_payload();
+
+    const auto response =
+        router.route(request);
+
+    require_equal(
+        response.result(),
+        beast_http::status::bad_request,
+        "Invalid restoration body status test"
+    );
+
+    const nlohmann::json payload =
+        nlohmann::json::parse(
+            response.body()
+        );
+
+    require_equal(
+        payload.at("error")
+            .at("code")
+            .get<std::string>(),
+        std::string{"invalid_request_body"},
+        "Invalid restoration body error-code test"
+    );
+}
+
+void test_existing_output_path_restoration()
+{
+    TemporaryDirectory directory;
+
+    const std::filesystem::path source_path =
+        directory.path()
+        / "existing-source.bin";
+
+    const std::filesystem::path output_path =
+        directory.path()
+        / "existing-output.bin";
+
+    write_test_file(
+        source_path,
+        create_test_data(1400)
+    );
+
+    write_test_file(
+        output_path,
+        create_test_data(10)
+    );
+
+    const auto service =
+        create_service(
+            directory.path() / "storage"
+        );
+
+    const auto stored =
+        service->store_file(
+            source_path
+        );
+
+    const nexusfs::http::HttpRouter router{
+        service
+    };
+
+    nexusfs::http::HttpRouter::Request request{
+        beast_http::verb::post,
+        "/api/v1/files/"
+            + stored.manifest_id
+            + "/restore",
+        11
+    };
+
+    request.set(
+        beast_http::field::content_type,
+        "application/json"
+    );
+
+    request.body() =
+        nlohmann::json{
+            {
+                "output_path",
+                output_path.string()
+            }
+        }.dump();
+
+    request.prepare_payload();
+
+    const auto response =
+        router.route(request);
+
+    require_equal(
+        response.result(),
+        beast_http::status::conflict,
+        "Existing output-path status test"
+    );
+
+    const nlohmann::json payload =
+        nlohmann::json::parse(
+            response.body()
+        );
+
+    require_equal(
+        payload.at("error")
+            .at("code")
+            .get<std::string>(),
+        std::string{"output_path_exists"},
+        "Existing output-path error-code test"
+    );
+
+    require_equal(
+        read_test_file(
+            output_path
+        ),
+        create_test_data(10),
+        "Existing output-path preservation test"
+    );
+}
+
+void test_missing_manifest_restoration()
+{
+    TemporaryDirectory directory;
+
+    const std::filesystem::path output_path =
+        directory.path() / "missing.bin";
+
+    const nexusfs::http::HttpRouter router{
+        create_service(
+            directory.path() / "storage"
+        )
+    };
+
+    const std::string missing_manifest_id(
+        64,
+        'f'
+    );
+
+    nexusfs::http::HttpRouter::Request request{
+        beast_http::verb::post,
+        "/api/v1/files/"
+            + missing_manifest_id
+            + "/restore",
+        11
+    };
+
+    request.set(
+        beast_http::field::content_type,
+        "application/json"
+    );
+
+    request.body() =
+        nlohmann::json{
+            {
+                "output_path",
+                output_path.string()
+            }
+        }.dump();
+
+    request.prepare_payload();
+
+    const auto response =
+        router.route(request);
+
+    require_equal(
+        response.result(),
+        beast_http::status::not_found,
+        "Missing restoration manifest status test"
+    );
+
+    const nlohmann::json payload =
+        nlohmann::json::parse(
+            response.body()
+        );
+
+    require_equal(
+        payload.at("error")
+            .at("code")
+            .get<std::string>(),
+        std::string{"manifest_not_found"},
+        "Missing restoration manifest code test"
+    );
+
+    require_true(
+        !std::filesystem::exists(
+            output_path
+        ),
+        "Missing restoration output absence test"
+    );
+}
+
+void test_corrupted_chunk_restoration()
+{
+    TemporaryDirectory directory;
+
+    const std::filesystem::path storage_root =
+        directory.path() / "storage";
+
+    const std::filesystem::path source_path =
+        directory.path()
+        / "corrupt-restore.bin";
+
+    const std::filesystem::path output_path =
+        directory.path()
+        / "restored-corrupt.bin";
+
+    write_test_file(
+        source_path,
+        create_test_data(1500)
+    );
+
+    const auto service =
+        create_service(
+            storage_root
+        );
+
+    const auto stored =
+        service->store_file(
+            source_path
+        );
+
+    const auto inspected =
+        service->inspect_file(
+            stored.manifest_id
+        );
+
+    require_true(
+        !inspected.chunks.empty(),
+        "Corrupted restoration chunk availability test"
+    );
+
+    corrupt_first_byte(
+        chunk_path(
+            storage_root,
+            inspected.chunks.front().hash
+        )
+    );
+
+    const nexusfs::http::HttpRouter router{
+        service
+    };
+
+    nexusfs::http::HttpRouter::Request request{
+        beast_http::verb::post,
+        "/api/v1/files/"
+            + stored.manifest_id
+            + "/restore",
+        11
+    };
+
+    request.set(
+        beast_http::field::content_type,
+        "application/json"
+    );
+
+    request.body() =
+        nlohmann::json{
+            {
+                "output_path",
+                output_path.string()
+            }
+        }.dump();
+
+    request.prepare_payload();
+
+    const auto response =
+        router.route(request);
+
+    require_equal(
+        response.result(),
+        beast_http::status::conflict,
+        "Corrupted restoration status test"
+    );
+
+    require_common_json_headers(
+        response,
+        "Corrupted restoration response"
+    );
+
+    const nlohmann::json payload =
+        nlohmann::json::parse(
+            response.body()
+        );
+
+    require_equal(
+        payload.at("error")
+            .at("code")
+            .get<std::string>(),
+        std::string{"restoration_failed"},
+        "Corrupted restoration error-code test"
+    );
+
+    require_true(
+        !std::filesystem::exists(
+            output_path
+        ),
+        "Corrupted restoration output cleanup test"
     );
 }
 
@@ -1165,6 +1767,36 @@ int main()
 
         std::cout
             << "[PASS] HTTP corrupted chunk verification\n";
+
+        test_restoration_route();
+
+        std::cout
+            << "[PASS] HTTP restoration route\n";
+
+        test_restoration_method_not_allowed();
+
+        std::cout
+            << "[PASS] HTTP restoration method rejection\n";
+
+        test_invalid_restoration_body();
+
+        std::cout
+            << "[PASS] HTTP invalid restoration body\n";
+
+        test_existing_output_path_restoration();
+
+        std::cout
+            << "[PASS] HTTP existing restoration output\n";
+
+        test_missing_manifest_restoration();
+
+        std::cout
+            << "[PASS] HTTP missing restoration manifest\n";
+
+        test_corrupted_chunk_restoration();
+
+        std::cout
+            << "[PASS] HTTP corrupted chunk restoration\n";
 
         std::cout
             << "All NexusFS HTTP router tests passed.\n";

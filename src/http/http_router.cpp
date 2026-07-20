@@ -4,9 +4,11 @@
 
 #include <algorithm>
 #include <exception>
+#include <filesystem>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <utility>
 
 namespace nexusfs::http
@@ -33,12 +35,15 @@ constexpr std::string_view verify_route_suffix{
     "/verify"
 };
 
+constexpr std::string_view restore_route_suffix{
+    "/restore"
+};
+
 std::string_view request_target(
     const HttpRouter::Request& request
 )
 {
-    const auto target =
-        request.target();
+    const auto target = request.target();
 
     return std::string_view{
         target.data(),
@@ -211,6 +216,48 @@ make_integrity_verification_failed_response(
         "integrity_verification_failed",
         "One or more stored chunks failed "
         "integrity verification."
+    );
+}
+
+HttpRouter::Response
+make_invalid_request_body_response(
+    const HttpRouter::Request& request
+)
+{
+    return make_error_response(
+        request,
+        beast_http::status::bad_request,
+        "invalid_request_body",
+        "The request body must be a JSON object "
+        "containing a non-empty output_path string."
+    );
+}
+
+HttpRouter::Response
+make_output_path_exists_response(
+    const HttpRouter::Request& request
+)
+{
+    return make_error_response(
+        request,
+        beast_http::status::conflict,
+        "output_path_exists",
+        "The requested restoration output path "
+        "already exists."
+    );
+}
+
+HttpRouter::Response
+make_restoration_failed_response(
+    const HttpRouter::Request& request
+)
+{
+    return make_error_response(
+        request,
+        beast_http::status::conflict,
+        "restoration_failed",
+        "The file could not be restored from "
+        "the currently stored chunks."
     );
 }
 
@@ -503,6 +550,59 @@ HttpRouter::Response make_verification_response(
     );
 }
 
+HttpRouter::Response make_restoration_response(
+    const HttpRouter::Request& request,
+    const app::RestoreFileResult& result
+)
+{
+    const nlohmann::ordered_json payload = {
+        {
+            "restoration",
+            {
+                {
+                    "manifest_id",
+                    result.manifest_id
+                },
+                {
+                    "filename",
+                    result.original_filename
+                },
+                {
+                    "file_size",
+                    result.file_size
+                },
+                {
+                    "chunk_count",
+                    result.chunk_count
+                },
+                {
+                    "output_path",
+                    result.output_path.string()
+                },
+                {
+                    "bytes_written",
+                    result.bytes_written
+                },
+                {
+                    "chunks_loaded",
+                    result.chunks_loaded
+                },
+                {
+                    "status",
+                    "restored"
+                }
+            }
+        }
+    };
+
+    return make_json_response(
+        beast_http::status::created,
+        payload,
+        request.version(),
+        request.keep_alive()
+    );
+}
+
 bool catalog_contains_manifest(
     const app::ListFilesResult& catalog,
     const std::string& manifest_id
@@ -605,6 +705,11 @@ HttpRouter::Response HttpRouter::route(
                 verify_route_suffix
             );
 
+        const bool is_restore_route =
+            remaining_target.ends_with(
+                restore_route_suffix
+            );
+
         if (is_verify_route)
         {
             remaining_target.remove_suffix(
@@ -622,8 +727,35 @@ HttpRouter::Response HttpRouter::route(
                 );
             }
         }
+        else if (is_restore_route)
+        {
+            remaining_target.remove_suffix(
+                restore_route_suffix.size()
+            );
+
+            if (
+                request.method() !=
+                beast_http::verb::post
+            )
+            {
+                return make_method_not_allowed_response(
+                    request,
+                    "POST"
+                );
+            }
+        }
         else
         {
+            if (
+                remaining_target.find('/') !=
+                std::string_view::npos
+            )
+            {
+                return make_not_found_response(
+                    request
+                );
+            }
+
             if (
                 request.method() !=
                 beast_http::verb::get
@@ -685,6 +817,87 @@ HttpRouter::Response HttpRouter::route(
                         make_integrity_verification_failed_response(
                             request
                         );
+                }
+            }
+
+            if (is_restore_route)
+            {
+                const nlohmann::json request_body =
+                    nlohmann::json::parse(
+                        request.body(),
+                        nullptr,
+                        false
+                    );
+
+                if (
+                    request_body.is_discarded() ||
+                    !request_body.is_object() ||
+                    !request_body.contains(
+                        "output_path"
+                    ) ||
+                    !request_body.at(
+                        "output_path"
+                    ).is_string()
+                )
+                {
+                    return make_invalid_request_body_response(
+                        request
+                    );
+                }
+
+                const std::string output_path_text =
+                    request_body.at(
+                        "output_path"
+                    ).get<std::string>();
+
+                if (output_path_text.empty())
+                {
+                    return make_invalid_request_body_response(
+                        request
+                    );
+                }
+
+                const std::filesystem::path output_path{
+                    output_path_text
+                };
+
+                std::error_code exists_error;
+
+                const bool output_exists =
+                    std::filesystem::exists(
+                        output_path,
+                        exists_error
+                    );
+
+                if (exists_error)
+                {
+                    return make_internal_error_response(
+                        request
+                    );
+                }
+
+                if (output_exists)
+                {
+                    return make_output_path_exists_response(
+                        request
+                    );
+                }
+
+                try
+                {
+                    return make_restoration_response(
+                        request,
+                        service_->restore_file(
+                            manifest_id,
+                            output_path
+                        )
+                    );
+                }
+                catch (const std::exception&)
+                {
+                    return make_restoration_failed_response(
+                        request
+                    );
                 }
             }
 
