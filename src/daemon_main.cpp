@@ -1,114 +1,86 @@
 #include "nexusfs/app/nexusfs_service.hpp"
+#include "nexusfs/daemon/daemon_configuration.hpp"
 #include "nexusfs/http/http_router.hpp"
 #include "nexusfs/http/http_server.hpp"
 
-#include <charconv>
-#include <cstddef>
-#include <cstdint>
 #include <exception>
-#include <filesystem>
+#include <iomanip>
 #include <iostream>
-#include <limits>
 #include <memory>
 #include <stdexcept>
-#include <string>
-#include <string_view>
-#include <system_error>
 #include <utility>
+#include <vector>
 
-namespace
-{
-
-const std::filesystem::path storage_root{
-    "nexusfs_data"
-};
-
-constexpr std::size_t default_chunk_size =
-    1024;
-
-std::uint16_t parse_port(
-    std::string_view port_text
+int main(
+    int argc,
+    char* argv[]
 )
-{
-    if (port_text.empty())
-    {
-        throw std::invalid_argument(
-            "HTTP server port cannot be empty."
-        );
-    }
-
-    unsigned int parsed_port = 0;
-
-    const char* const begin =
-        port_text.data();
-
-    const char* const end =
-        begin + port_text.size();
-
-    const auto [position, error] =
-        std::from_chars(
-            begin,
-            end,
-            parsed_port
-        );
-
-    if (
-        error != std::errc{} ||
-        position != end ||
-        parsed_port == 0 ||
-        parsed_port >
-            std::numeric_limits<
-                std::uint16_t
-            >::max()
-    )
-    {
-        throw std::invalid_argument(
-            "HTTP server port must be an integer "
-            "between 1 and 65535."
-        );
-    }
-
-    return static_cast<std::uint16_t>(
-        parsed_port
-    );
-}
-
-void print_usage()
-{
-    std::cerr
-        << "Usage:\n"
-        << "  nexusfsd <address> <port>\n\n"
-        << "Example:\n"
-        << "  nexusfsd 127.0.0.1 8080\n";
-}
-
-}
-
-int main(int argc, char* argv[])
 {
     try
     {
-        if (argc != 3)
+        std::vector<const char*> arguments;
+
+        arguments.reserve(
+            static_cast<std::size_t>(
+                argc
+            )
+        );
+
+        for (
+            int index = 0;
+            index < argc;
+            ++index
+        )
         {
-            print_usage();
-            return 1;
+            arguments.push_back(
+                argv[index]
+            );
         }
 
-        std::string address{
-            argv[1]
-        };
+        const nexusfs::daemon::DaemonCommandLineResult
+            command_line =
+                nexusfs::daemon::
+                    parse_daemon_command_line(
+                        argc,
+                        arguments.data()
+                    );
 
-        const std::uint16_t port =
-            parse_port(
-                argv[2]
-            );
+        if (command_line.show_help)
+        {
+            std::cout
+                << nexusfs::daemon::
+                    daemon_usage();
+
+            return 0;
+        }
+
+        const nexusfs::daemon::DaemonConfiguration&
+            configuration =
+                command_line.configuration;
+
+        std::cout
+            << "NexusFS daemon configuration:\n"
+            << "  Address: "
+            << configuration.address
+            << '\n'
+            << "  Port: "
+            << configuration.port
+            << '\n'
+            << "  Storage root: "
+            << std::quoted(
+                configuration.storage_root.string()
+            )
+            << '\n'
+            << "  Chunk size: "
+            << configuration.chunk_size
+            << " bytes\n";
 
         const auto service =
             std::make_shared<
                 nexusfs::app::NexusFsService
             >(
-                storage_root,
-                default_chunk_size
+                configuration.storage_root,
+                configuration.chunk_size
             );
 
         const nexusfs::http::HttpRouter router{
@@ -116,14 +88,25 @@ int main(int argc, char* argv[])
         };
 
         const nexusfs::http::HttpServer server{
-            std::move(address),
-            port,
+            configuration.address,
+            configuration.port,
             router
         };
 
         server.run();
 
         return 0;
+    }
+    catch (const std::invalid_argument& error)
+    {
+        std::cerr
+            << "NexusFS daemon configuration error: "
+            << error.what()
+            << "\n\n"
+            << nexusfs::daemon::
+                daemon_usage();
+
+        return 1;
     }
     catch (const std::exception& error)
     {
