@@ -9,16 +9,179 @@
 #include "nexusfs/storage/manifest_store.hpp"
 #include "nexusfs/storage/sha256_hasher.hpp"
 
+#include <cctype>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <memory>
+#include <mutex>
+#include <shared_mutex>
 #include <stdexcept>
 #include <string>
+#include <system_error>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
 namespace nexusfs::app
 {
+
+class NexusFsServiceConcurrencyState
+{
+public:
+    std::shared_mutex storage_mutex;
+
+    [[nodiscard]] std::shared_ptr<std::mutex>
+    output_mutex_for(
+        const std::filesystem::path& output_path
+    )
+    {
+        const std::string key =
+            normalized_path_key(
+                output_path
+            );
+
+        const std::lock_guard lock{
+            output_mutex_registry_mutex_
+        };
+
+        remove_expired_output_mutexes();
+
+        const auto existing =
+            output_mutexes_.find(
+                key
+            );
+
+        if (
+            existing !=
+            output_mutexes_.end()
+        )
+        {
+            if (
+                const std::shared_ptr<std::mutex>
+                    mutex =
+                        existing->second.lock()
+            )
+            {
+                return mutex;
+            }
+        }
+
+        const auto mutex =
+            std::make_shared<std::mutex>();
+
+        output_mutexes_[key] =
+            mutex;
+
+        return mutex;
+    }
+
+private:
+    static std::filesystem::path
+    normalized_absolute_path(
+        const std::filesystem::path& path
+    )
+    {
+        std::error_code error;
+
+        std::filesystem::path normalized =
+            std::filesystem::absolute(
+                path,
+                error
+            );
+
+        if (error)
+        {
+            error.clear();
+
+            normalized =
+                path;
+        }
+
+        normalized =
+            normalized.lexically_normal();
+
+        const std::filesystem::path
+            canonical_path =
+                std::filesystem::weakly_canonical(
+                    normalized,
+                    error
+                );
+
+        if (!error)
+        {
+            normalized =
+                canonical_path;
+        }
+
+        return normalized;
+    }
+
+    static std::string normalized_path_key(
+        const std::filesystem::path& path
+    )
+    {
+        std::string key =
+            normalized_absolute_path(
+                path
+            ).generic_string();
+
+#ifdef _WIN32
+        /*
+         * Windows paths are normally case-insensitive.
+         * Normalizing ASCII case ensures equivalent drive
+         * letters and conventional paths share one lock.
+         */
+        for (char& character : key)
+        {
+            const auto value =
+                static_cast<unsigned char>(
+                    character
+                );
+
+            character =
+                static_cast<char>(
+                    std::tolower(value)
+                );
+        }
+#endif
+
+        return key;
+    }
+
+    void remove_expired_output_mutexes()
+    {
+        auto iterator =
+            output_mutexes_.begin();
+
+        while (
+            iterator !=
+            output_mutexes_.end()
+        )
+        {
+            if (
+                iterator->second.expired()
+            )
+            {
+                iterator =
+                    output_mutexes_.erase(
+                        iterator
+                    );
+            }
+            else
+            {
+                ++iterator;
+            }
+        }
+    }
+
+    std::mutex output_mutex_registry_mutex_;
+
+    std::unordered_map<
+        std::string,
+        std::weak_ptr<std::mutex>
+    > output_mutexes_;
+};
 
 namespace
 {
@@ -29,13 +192,158 @@ struct LoadedManifest
     storage::FileManifest manifest;
 };
 
+std::filesystem::path normalized_absolute_path(
+    const std::filesystem::path& path
+)
+{
+    std::error_code error;
+
+    std::filesystem::path normalized =
+        std::filesystem::absolute(
+            path,
+            error
+        );
+
+    if (error)
+    {
+        error.clear();
+
+        normalized =
+            path;
+    }
+
+    normalized =
+        normalized.lexically_normal();
+
+    const std::filesystem::path canonical_path =
+        std::filesystem::weakly_canonical(
+            normalized,
+            error
+        );
+
+    if (!error)
+    {
+        normalized =
+            canonical_path;
+    }
+
+    return normalized;
+}
+
+std::string normalized_storage_key(
+    const std::filesystem::path& path
+)
+{
+    std::string key =
+        normalized_absolute_path(
+            path
+        ).generic_string();
+
+#ifdef _WIN32
+    for (char& character : key)
+    {
+        const auto value =
+            static_cast<unsigned char>(
+                character
+            );
+
+        character =
+            static_cast<char>(
+                std::tolower(value)
+            );
+    }
+#endif
+
+    return key;
+}
+
+std::shared_ptr<NexusFsServiceConcurrencyState>
+acquire_concurrency_state(
+    const std::filesystem::path& storage_root
+)
+{
+    static std::mutex registry_mutex;
+
+    static std::unordered_map<
+        std::string,
+        std::weak_ptr<
+            NexusFsServiceConcurrencyState
+        >
+    > registry;
+
+    const std::string key =
+        normalized_storage_key(
+            storage_root
+        );
+
+    const std::lock_guard lock{
+        registry_mutex
+    };
+
+    auto iterator =
+        registry.begin();
+
+    while (
+        iterator !=
+        registry.end()
+    )
+    {
+        if (
+            iterator->second.expired()
+        )
+        {
+            iterator =
+                registry.erase(
+                    iterator
+                );
+        }
+        else
+        {
+            ++iterator;
+        }
+    }
+
+    const auto existing =
+        registry.find(
+            key
+        );
+
+    if (
+        existing !=
+        registry.end()
+    )
+    {
+        if (
+            const std::shared_ptr<
+                NexusFsServiceConcurrencyState
+            > state =
+                existing->second.lock()
+        )
+        {
+            return state;
+        }
+    }
+
+    const auto state =
+        std::make_shared<
+            NexusFsServiceConcurrencyState
+        >();
+
+    registry[key] =
+        state;
+
+    return state;
+}
+
 LoadedManifest load_canonical_manifest(
     const storage::ManifestStore& manifest_store,
     const std::string& manifest_id
 )
 {
     auto encoded_manifest =
-        manifest_store.load(manifest_id);
+        manifest_store.load(
+            manifest_id
+        );
 
     auto manifest =
         storage::FileManifestCodec::decode(
@@ -47,7 +355,10 @@ LoadedManifest load_canonical_manifest(
             manifest
         );
 
-    if (canonical_manifest != encoded_manifest)
+    if (
+        canonical_manifest !=
+        encoded_manifest
+    )
     {
         throw std::runtime_error(
             "Stored manifest is not canonically encoded: "
@@ -67,8 +378,12 @@ NexusFsService::NexusFsService(
     std::filesystem::path storage_root,
     std::size_t default_chunk_size
 )
-    : storage_root_{std::move(storage_root)},
-      default_chunk_size_{default_chunk_size}
+    : storage_root_{
+          std::move(storage_root)
+      },
+      default_chunk_size_{
+          default_chunk_size
+      }
 {
     if (storage_root_.empty())
     {
@@ -83,6 +398,32 @@ NexusFsService::NexusFsService(
             "NexusFS default chunk size must be greater than zero."
         );
     }
+
+    concurrency_state_ =
+        acquire_concurrency_state(
+            storage_root_
+        );
+
+    /*
+     * Initialize the storage layout under the exclusive
+     * process-wide lock. Read operations may then construct
+     * stores without racing while directories are created.
+     */
+    const std::unique_lock storage_lock{
+        concurrency_state_->
+            storage_mutex
+    };
+
+    const storage::ChunkStore chunk_store{
+        storage_root_
+    };
+
+    const storage::ManifestStore manifest_store{
+        storage_root_
+    };
+
+    (void)chunk_store;
+    (void)manifest_store;
 }
 
 StoreFileResult NexusFsService::store_file(
@@ -95,6 +436,11 @@ StoreFileResult NexusFsService::store_file(
             "Source file path cannot be empty."
         );
     }
+
+    const std::unique_lock storage_lock{
+        concurrency_state_->
+            storage_mutex
+    };
 
     const storage::Chunker chunker{
         default_chunk_size_
@@ -109,7 +455,9 @@ StoreFileResult NexusFsService::store_file(
     };
 
     const auto chunks =
-        chunker.split_file(source_path);
+        chunker.split_file(
+            source_path
+        );
 
     const auto manifest =
         storage::FileManifest::create(
@@ -131,10 +479,16 @@ StoreFileResult NexusFsService::store_file(
     std::size_t chunks_stored = 0;
     std::size_t chunks_reused = 0;
 
-    for (const auto& chunk : chunks)
+    for (
+        const auto& chunk :
+        chunks
+    )
     {
-        const storage::StoreResult store_result =
-            chunk_store.store(chunk);
+        const storage::StoreResult
+            store_result =
+                chunk_store.store(
+                    chunk
+                );
 
         if (
             store_result ==
@@ -149,14 +503,21 @@ StoreFileResult NexusFsService::store_file(
         }
 
         const auto loaded_chunk =
-            chunk_store.load(chunk.hash);
+            chunk_store.load(
+                chunk.hash
+            );
 
-        if (loaded_chunk != chunk.data)
+        if (
+            loaded_chunk !=
+            chunk.data
+        )
         {
             throw std::runtime_error(
                 "Stored chunk data does not match "
                 "the source chunk at index "
-                + std::to_string(chunk.index)
+                + std::to_string(
+                    chunk.index
+                )
                 + "."
             );
         }
@@ -220,11 +581,32 @@ RestoreFileResult NexusFsService::restore_file(
         );
     }
 
-    storage::ChunkStore chunk_store{
+    const std::shared_ptr<std::mutex>
+        output_mutex =
+            concurrency_state_->
+                output_mutex_for(
+                    output_path
+                );
+
+    /*
+     * The output lock serializes restorations targeting the
+     * same normalized path while allowing unrelated output
+     * files to be reconstructed concurrently.
+     */
+    const std::unique_lock output_lock{
+        *output_mutex
+    };
+
+    const std::shared_lock storage_lock{
+        concurrency_state_->
+            storage_mutex
+    };
+
+    const storage::ChunkStore chunk_store{
         storage_root_
     };
 
-    storage::ManifestStore manifest_store{
+    const storage::ManifestStore manifest_store{
         storage_root_
     };
 
@@ -244,7 +626,8 @@ RestoreFileResult NexusFsService::restore_file(
 
     return RestoreFileResult{
         manifest_id,
-        loaded_manifest.manifest.original_filename(),
+        loaded_manifest.manifest
+            .original_filename(),
         loaded_manifest.manifest.file_size(),
         loaded_manifest.manifest.chunk_count(),
         output_path,
@@ -264,11 +647,16 @@ InspectFileResult NexusFsService::inspect_file(
         );
     }
 
-    storage::ChunkStore chunk_store{
+    const std::shared_lock storage_lock{
+        concurrency_state_->
+            storage_mutex
+    };
+
+    const storage::ChunkStore chunk_store{
         storage_root_
     };
 
-    storage::ManifestStore manifest_store{
+    const storage::ManifestStore manifest_store{
         storage_root_
     };
 
@@ -278,16 +666,20 @@ InspectFileResult NexusFsService::inspect_file(
             manifest_id
         );
 
-    std::vector<InspectedChunk> inspected_chunks;
+    std::vector<InspectedChunk>
+        inspected_chunks;
+
     inspected_chunks.reserve(
-        loaded_manifest.manifest.chunk_count()
+        loaded_manifest.manifest
+            .chunk_count()
     );
 
     std::size_t available_chunks = 0;
     std::size_t missing_chunks = 0;
 
     const auto& chunk_hashes =
-        loaded_manifest.manifest.chunk_hashes();
+        loaded_manifest.manifest
+            .chunk_hashes();
 
     for (
         std::size_t index = 0;
@@ -299,7 +691,9 @@ InspectFileResult NexusFsService::inspect_file(
             chunk_hashes[index];
 
         const bool is_present =
-            chunk_store.contains(chunk_hash);
+            chunk_store.contains(
+                chunk_hash
+            );
 
         if (is_present)
         {
@@ -321,7 +715,8 @@ InspectFileResult NexusFsService::inspect_file(
 
     return InspectFileResult{
         manifest_id,
-        loaded_manifest.manifest.original_filename(),
+        loaded_manifest.manifest
+            .original_filename(),
         loaded_manifest.manifest.file_size(),
         loaded_manifest.manifest.chunk_size(),
         loaded_manifest.encoded_manifest.size(),
@@ -342,11 +737,16 @@ VerifyFileResult NexusFsService::verify_file(
         );
     }
 
-    storage::ChunkStore chunk_store{
+    const std::shared_lock storage_lock{
+        concurrency_state_->
+            storage_mutex
+    };
+
+    const storage::ChunkStore chunk_store{
         storage_root_
     };
 
-    storage::ManifestStore manifest_store{
+    const storage::ManifestStore manifest_store{
         storage_root_
     };
 
@@ -367,12 +767,15 @@ VerifyFileResult NexusFsService::verify_file(
         verified_chunks;
 
     verified_chunks.reserve(
-        verification_result.verified_chunks.size()
+        verification_result
+            .verified_chunks.size()
     );
 
     for (
-        const storage::VerifiedChunk& verified_chunk :
-        verification_result.verified_chunks
+        const storage::VerifiedChunk&
+            verified_chunk :
+        verification_result
+            .verified_chunks
     )
     {
         verified_chunks.push_back(
@@ -386,34 +789,49 @@ VerifyFileResult NexusFsService::verify_file(
 
     return VerifyFileResult{
         manifest_id,
-        loaded_manifest.manifest.original_filename(),
+        loaded_manifest.manifest
+            .original_filename(),
         loaded_manifest.manifest.file_size(),
         loaded_manifest.manifest.chunk_count(),
         std::move(verified_chunks),
-        verification_result.total_bytes_verified
+        verification_result
+            .total_bytes_verified
     };
 }
 
 ListFilesResult NexusFsService::list_files() const
 {
-    storage::ChunkStore chunk_store{
+    const std::shared_lock storage_lock{
+        concurrency_state_->
+            storage_mutex
+    };
+
+    const storage::ChunkStore chunk_store{
         storage_root_
     };
 
-    storage::ManifestStore manifest_store{
+    const storage::ManifestStore manifest_store{
         storage_root_
     };
 
-    const std::vector<std::string> manifest_ids =
-        manifest_store.list_manifest_ids();
+    const std::vector<std::string>
+        manifest_ids =
+            manifest_store
+                .list_manifest_ids();
 
     std::vector<StoredFileSummary> files;
-    files.reserve(manifest_ids.size());
+
+    files.reserve(
+        manifest_ids.size()
+    );
 
     std::size_t complete_manifests = 0;
     std::size_t incomplete_manifests = 0;
 
-    for (const std::string& manifest_id : manifest_ids)
+    for (
+        const std::string& manifest_id :
+        manifest_ids
+    )
     {
         const LoadedManifest loaded_manifest =
             load_canonical_manifest(
@@ -425,10 +843,15 @@ ListFilesResult NexusFsService::list_files() const
 
         for (
             const std::string& chunk_hash :
-            loaded_manifest.manifest.chunk_hashes()
+            loaded_manifest.manifest
+                .chunk_hashes()
         )
         {
-            if (!chunk_store.contains(chunk_hash))
+            if (
+                !chunk_store.contains(
+                    chunk_hash
+                )
+            )
             {
                 ++missing_chunks;
             }
@@ -448,9 +871,12 @@ ListFilesResult NexusFsService::list_files() const
                 manifest_id,
                 loaded_manifest.manifest
                     .original_filename(),
-                loaded_manifest.manifest.file_size(),
-                loaded_manifest.manifest.chunk_size(),
-                loaded_manifest.manifest.chunk_count(),
+                loaded_manifest.manifest
+                    .file_size(),
+                loaded_manifest.manifest
+                    .chunk_size(),
+                loaded_manifest.manifest
+                    .chunk_count(),
                 missing_chunks
             }
         );

@@ -206,6 +206,29 @@ if(BUILD_TESTING)
         PROPERTIES
             TIMEOUT 30
     )
+
+    add_executable(
+        nexusfs_service_concurrency_tests
+        tests/test_service_concurrency.cpp
+    )
+
+    target_link_libraries(
+        nexusfs_service_concurrency_tests
+        PRIVATE
+            nexusfs_core
+            Threads::Threads
+    )
+
+    add_test(
+        NAME nexusfs_service_concurrency_tests
+        COMMAND nexusfs_service_concurrency_tests
+    )
+
+    set_tests_properties(
+        nexusfs_service_concurrency_tests
+        PROPERTIES
+            TIMEOUT 60
+    )
 endif()
 
 if(MSVC)
@@ -275,6 +298,13 @@ if(MSVC)
 
         target_compile_options(
             nexusfs_http_server_lifecycle_tests
+            PRIVATE
+                /W4
+                /permissive-
+        )
+
+        target_compile_options(
+            nexusfs_service_concurrency_tests
             PRIVATE
                 /W4
                 /permissive-
@@ -356,6 +386,14 @@ else()
 
         target_compile_options(
             nexusfs_http_server_lifecycle_tests
+            PRIVATE
+                -Wall
+                -Wextra
+                -Wpedantic
+        )
+
+        target_compile_options(
+            nexusfs_service_concurrency_tests
             PRIVATE
                 -Wall
                 -Wextra

@@ -1,11 +1,17 @@
 #include "nexusfs/storage/file_reconstructor.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
+#include <cstdint>
+#include <filesystem>
 #include <fstream>
+#include <functional>
 #include <limits>
 #include <stdexcept>
+#include <string>
 #include <system_error>
+#include <thread>
 
 namespace nexusfs::storage
 {
@@ -26,15 +32,104 @@ std::uint64_t convert_size_to_uint64(
         if (
             value >
             static_cast<std::size_t>(
-                std::numeric_limits<std::uint64_t>::max()
+                std::numeric_limits<
+                    std::uint64_t
+                >::max()
             )
         )
         {
-            throw std::overflow_error(error_message);
+            throw std::overflow_error(
+                error_message
+            );
         }
     }
 
-    return static_cast<std::uint64_t>(value);
+    return static_cast<std::uint64_t>(
+        value
+    );
+}
+
+std::filesystem::path make_temporary_path(
+    const std::filesystem::path& output_path
+)
+{
+    /*
+     * The atomic sequence prevents collisions when concurrent
+     * reconstructions observe the same clock timestamp.
+     */
+    static std::atomic<std::uint64_t> sequence{
+        0
+    };
+
+    const auto timestamp =
+        std::chrono::steady_clock::now()
+            .time_since_epoch()
+            .count();
+
+    const std::uint64_t current_sequence =
+        sequence.fetch_add(
+            1,
+            std::memory_order_relaxed
+        );
+
+    const std::size_t thread_token =
+        std::hash<std::thread::id>{}(
+            std::this_thread::get_id()
+        );
+
+    std::filesystem::path temporary_path =
+        output_path;
+
+    temporary_path +=
+        ".tmp."
+        + std::to_string(timestamp)
+        + "."
+        + std::to_string(thread_token)
+        + "."
+        + std::to_string(current_sequence);
+
+    return temporary_path;
+}
+
+void remove_temporary_file(
+    const std::filesystem::path& temporary_path
+) noexcept
+{
+    std::error_code cleanup_error;
+
+    std::filesystem::remove(
+        temporary_path,
+        cleanup_error
+    );
+}
+
+void require_output_path_absent(
+    const std::filesystem::path& output_path
+)
+{
+    std::error_code existence_error;
+
+    const bool output_exists =
+        std::filesystem::exists(
+            output_path,
+            existence_error
+        );
+
+    if (existence_error)
+    {
+        throw std::runtime_error(
+            "Failed to inspect reconstruction output path: "
+            + existence_error.message()
+        );
+    }
+
+    if (output_exists)
+    {
+        throw std::runtime_error(
+            "Reconstruction output path already exists: "
+            + output_path.string()
+        );
+    }
 }
 
 }
@@ -59,13 +154,9 @@ ReconstructionResult FileReconstructor::reconstruct(
         );
     }
 
-    if (std::filesystem::exists(output_path))
-    {
-        throw std::runtime_error(
-            "Reconstruction output path already exists: "
-            + output_path.string()
-        );
-    }
+    require_output_path_absent(
+        output_path
+    );
 
     const std::filesystem::path parent_directory =
         output_path.parent_path();
@@ -88,21 +179,15 @@ ReconstructionResult FileReconstructor::reconstruct(
         }
     }
 
-    const auto timestamp =
-        std::chrono::steady_clock::now()
-            .time_since_epoch()
-            .count();
-
-    std::filesystem::path temporary_path =
-        output_path;
-
-    temporary_path +=
-        ".tmp."
-        + std::to_string(timestamp);
+    const std::filesystem::path temporary_path =
+        make_temporary_path(
+            output_path
+        );
 
     std::ofstream output{
         temporary_path,
-        std::ios::binary | std::ios::trunc
+        std::ios::binary
+            | std::ios::trunc
     };
 
     if (!output.is_open())
@@ -121,30 +206,41 @@ ReconstructionResult FileReconstructor::reconstruct(
         const std::uint64_t configured_chunk_size =
             convert_size_to_uint64(
                 manifest.chunk_size(),
-                "Manifest chunk size exceeds the reconstruction limit."
+                "Manifest chunk size exceeds "
+                "the reconstruction limit."
             );
+
+        const auto& chunk_hashes =
+            manifest.chunk_hashes();
 
         for (
             std::size_t index = 0;
-            index < manifest.chunk_hashes().size();
+            index < chunk_hashes.size();
             ++index
         )
         {
-            if (bytes_written > manifest.file_size())
+            if (
+                bytes_written >
+                manifest.file_size()
+            )
             {
                 throw std::runtime_error(
-                    "Reconstructed byte count exceeds the manifest file size."
+                    "Reconstructed byte count exceeds "
+                    "the manifest file size."
                 );
             }
 
             const std::string& chunk_hash =
-                manifest.chunk_hashes()[index];
+                chunk_hashes[index];
 
             const auto chunk_data =
-                chunk_store.load(chunk_hash);
+                chunk_store.load(
+                    chunk_hash
+                );
 
             const std::uint64_t remaining_bytes =
-                manifest.file_size() - bytes_written;
+                manifest.file_size()
+                - bytes_written;
 
             const std::uint64_t expected_chunk_size =
                 std::min(
@@ -155,14 +251,18 @@ ReconstructionResult FileReconstructor::reconstruct(
             const std::uint64_t actual_chunk_size =
                 convert_size_to_uint64(
                     chunk_data.size(),
-                    "Loaded chunk size exceeds the reconstruction limit."
+                    "Loaded chunk size exceeds "
+                    "the reconstruction limit."
                 );
 
-            if (actual_chunk_size != expected_chunk_size)
+            if (
+                actual_chunk_size !=
+                expected_chunk_size
+            )
             {
                 throw std::runtime_error(
-                    "Stored chunk size is inconsistent with the manifest "
-                    "at chunk index "
+                    "Stored chunk size is inconsistent "
+                    "with the manifest at chunk index "
                     + std::to_string(index)
                     + "."
                 );
@@ -171,19 +271,24 @@ ReconstructionResult FileReconstructor::reconstruct(
             if (
                 chunk_data.size() >
                 static_cast<std::size_t>(
-                    std::numeric_limits<std::streamsize>::max()
+                    std::numeric_limits<
+                        std::streamsize
+                    >::max()
                 )
             )
             {
                 throw std::runtime_error(
-                    "Chunk is too large for stream-based reconstruction."
+                    "Chunk is too large for "
+                    "stream-based reconstruction."
                 );
             }
 
             if (!chunk_data.empty())
             {
                 output.write(
-                    reinterpret_cast<const char*>(
+                    reinterpret_cast<
+                        const char*
+                    >(
                         chunk_data.data()
                     ),
                     static_cast<std::streamsize>(
@@ -194,28 +299,39 @@ ReconstructionResult FileReconstructor::reconstruct(
                 if (!output)
                 {
                     throw std::runtime_error(
-                        "Failed while writing reconstructed chunk "
+                        "Failed while writing reconstructed "
+                        "chunk "
                         + std::to_string(index)
                         + "."
                     );
                 }
             }
 
-            bytes_written += actual_chunk_size;
+            bytes_written +=
+                actual_chunk_size;
+
             ++chunks_loaded;
         }
 
-        if (chunks_loaded != manifest.chunk_count())
+        if (
+            chunks_loaded !=
+            manifest.chunk_count()
+        )
         {
             throw std::runtime_error(
-                "Loaded chunk count does not match the manifest."
+                "Loaded chunk count does not match "
+                "the manifest."
             );
         }
 
-        if (bytes_written != manifest.file_size())
+        if (
+            bytes_written !=
+            manifest.file_size()
+        )
         {
             throw std::runtime_error(
-                "Reconstructed file size does not match the manifest."
+                "Reconstructed file size does not match "
+                "the manifest."
             );
         }
 
@@ -224,7 +340,8 @@ ReconstructionResult FileReconstructor::reconstruct(
         if (!output)
         {
             throw std::runtime_error(
-                "Failed while flushing the reconstructed file."
+                "Failed while flushing "
+                "the reconstructed file."
             );
         }
 
@@ -233,9 +350,50 @@ ReconstructionResult FileReconstructor::reconstruct(
         if (!output)
         {
             throw std::runtime_error(
-                "Failed while closing the reconstructed file."
+                "Failed while closing "
+                "the reconstructed file."
             );
         }
+
+        std::error_code temporary_size_error;
+
+        const std::uintmax_t temporary_file_size =
+            std::filesystem::file_size(
+                temporary_path,
+                temporary_size_error
+            );
+
+        if (temporary_size_error)
+        {
+            throw std::runtime_error(
+                "Failed to determine reconstructed "
+                "temporary-file size: "
+                + temporary_size_error.message()
+            );
+        }
+
+        if (
+            temporary_file_size !=
+            static_cast<std::uintmax_t>(
+                manifest.file_size()
+            )
+        )
+        {
+            throw std::runtime_error(
+                "Temporary reconstructed file size "
+                "does not match the manifest."
+            );
+        }
+
+        /*
+         * The service-level per-output-path lock prevents
+         * concurrent NexusFS restorations from racing here.
+         * Rechecking also protects against an output created
+         * during reconstruction by another local operation.
+         */
+        require_output_path_absent(
+            output_path
+        );
 
         std::error_code rename_error;
 
@@ -247,6 +405,26 @@ ReconstructionResult FileReconstructor::reconstruct(
 
         if (rename_error)
         {
+            std::error_code existence_error;
+
+            const bool output_exists =
+                std::filesystem::exists(
+                    output_path,
+                    existence_error
+                );
+
+            if (
+                !existence_error
+                && output_exists
+            )
+            {
+                throw std::runtime_error(
+                    "Reconstruction output path "
+                    "already exists: "
+                    + output_path.string()
+                );
+            }
+
             throw std::runtime_error(
                 "Failed to finalize the reconstructed file: "
                 + rename_error.message()
@@ -257,11 +435,8 @@ ReconstructionResult FileReconstructor::reconstruct(
     {
         output.close();
 
-        std::error_code cleanup_error;
-
-        std::filesystem::remove(
-            temporary_path,
-            cleanup_error
+        remove_temporary_file(
+            temporary_path
         );
 
         throw;

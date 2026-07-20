@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -88,6 +89,15 @@ struct ListFilesResult
     std::size_t incomplete_manifests;
 };
 
+/*
+ * Internal process-wide synchronization state.
+ *
+ * Services constructed for equivalent storage-root paths share the
+ * same state, preventing independently created service objects from
+ * racing against each other inside one NexusFS process.
+ */
+class NexusFsServiceConcurrencyState;
+
 class NexusFsService
 {
 public:
@@ -96,6 +106,20 @@ public:
         std::size_t default_chunk_size = 1024
     );
 
+    /*
+     * Storage operation locking model:
+     *
+     * store_file():
+     *     Exclusive storage lock because it publishes chunks and
+     *     a manifest into the shared content-addressed store.
+     *
+     * restore_file():
+     *     Shared storage lock because it only reads NexusFS storage.
+     *     Restoration output paths are protected separately.
+     *
+     * inspect_file(), verify_file(), list_files():
+     *     Shared storage locks, allowing concurrent readers.
+     */
     [[nodiscard]] StoreFileResult store_file(
         const std::filesystem::path& source_path
     ) const;
@@ -124,6 +148,15 @@ public:
 private:
     std::filesystem::path storage_root_;
     std::size_t default_chunk_size_;
+
+    /*
+     * shared_ptr deliberately preserves the original copyability of
+     * NexusFsService. Copies of one service continue sharing the same
+     * synchronization state.
+     */
+    std::shared_ptr<
+        NexusFsServiceConcurrencyState
+    > concurrency_state_;
 };
 
 }
