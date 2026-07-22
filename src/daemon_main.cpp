@@ -2,6 +2,8 @@
 #include "nexusfs/daemon/daemon_configuration.hpp"
 #include "nexusfs/http/http_router.hpp"
 #include "nexusfs/http/http_server.hpp"
+#include "nexusfs/observability/json_logger.hpp"
+#include "nexusfs/observability/metrics_registry.hpp"
 
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/signal_set.hpp>
@@ -9,8 +11,8 @@
 
 #include <csignal>
 #include <cstddef>
+#include <cstdint>
 #include <exception>
-#include <iomanip>
 #include <iostream>
 #include <memory>
 #include <stdexcept>
@@ -33,9 +35,6 @@ void register_shutdown_signals(
     );
 
 #ifdef SIGBREAK
-    /*
-     * Windows generates SIGBREAK for Ctrl + Break.
-     */
     signals.add(
         SIGBREAK
     );
@@ -83,8 +82,8 @@ int main(
             );
         }
 
-        const nexusfs::daemon::DaemonCommandLineResult
-            command_line =
+        const nexusfs::daemon::
+            DaemonCommandLineResult command_line =
                 nexusfs::daemon::
                     parse_daemon_command_line(
                         argc,
@@ -100,26 +99,54 @@ int main(
             return 0;
         }
 
-        const nexusfs::daemon::DaemonConfiguration&
-            configuration =
+        const nexusfs::daemon::
+            DaemonConfiguration& configuration =
                 command_line.configuration;
 
-        std::cout
-            << "NexusFS daemon configuration:\n"
-            << "  Address: "
-            << configuration.address
-            << '\n'
-            << "  Port: "
-            << configuration.port
-            << '\n'
-            << "  Storage root: "
-            << std::quoted(
-                configuration.storage_root.string()
-            )
-            << '\n'
-            << "  Chunk size: "
-            << configuration.chunk_size
-            << " bytes\n";
+        const auto logger =
+            std::make_shared<
+                nexusfs::observability::
+                    JsonLogger
+            >(
+                &std::cout
+            );
+
+        const auto metrics_registry =
+            std::make_shared<
+                nexusfs::observability::
+                    MetricsRegistry
+            >();
+
+        logger->log(
+            nexusfs::observability::
+                LogLevel::info,
+            "daemon_configuration",
+            "NexusFS daemon configuration loaded.",
+            {
+                nexusfs::observability::LogField{
+                    "address",
+                    configuration.address
+                },
+                nexusfs::observability::LogField{
+                    "port",
+                    static_cast<std::uint64_t>(
+                        configuration.port
+                    )
+                },
+                nexusfs::observability::LogField{
+                    "storage_root",
+                    configuration
+                        .storage_root
+                        .string()
+                },
+                nexusfs::observability::LogField{
+                    "chunk_size",
+                    static_cast<std::uint64_t>(
+                        configuration.chunk_size
+                    )
+                }
+            }
+        );
 
         const auto service =
             std::make_shared<
@@ -130,7 +157,9 @@ int main(
             );
 
         const nexusfs::http::HttpRouter router{
-            service
+            service,
+            metrics_registry,
+            logger
         };
 
         nexusfs::http::HttpServer server{
@@ -153,7 +182,8 @@ int main(
 
         signals.async_wait(
             [
-                &server
+                &server,
+                logger
             ](
                 const boost::system::error_code& error,
                 int signal_number
@@ -164,11 +194,24 @@ int main(
                     return;
                 }
 
-                std::cout
-                    << "\nNexusFS daemon received "
-                    << "shutdown signal "
-                    << signal_number
-                    << ".\n";
+                logger->log(
+                    nexusfs::observability::
+                        LogLevel::info,
+                    "daemon_shutdown_requested",
+                    "NexusFS daemon received "
+                    "a shutdown signal.",
+                    {
+                        nexusfs::observability::
+                            LogField{
+                                "signal_number",
+                                static_cast<
+                                    std::int64_t
+                                >(
+                                    signal_number
+                                )
+                            }
+                    }
+                );
 
                 server.stop();
             }
@@ -183,6 +226,13 @@ int main(
             }
         };
 
+        logger->log(
+            nexusfs::observability::
+                LogLevel::info,
+            "daemon_starting",
+            "NexusFS daemon is starting."
+        );
+
         try
         {
             server.run();
@@ -196,6 +246,14 @@ int main(
                 signal_thread
             );
 
+            logger->log(
+                nexusfs::observability::
+                    LogLevel::error,
+                "daemon_failed",
+                "NexusFS daemon terminated "
+                "because of an error."
+            );
+
             throw;
         }
 
@@ -204,8 +262,12 @@ int main(
             signal_thread
         );
 
-        std::cout
-            << "NexusFS daemon stopped cleanly.\n";
+        logger->log(
+            nexusfs::observability::
+                LogLevel::info,
+            "daemon_stopped",
+            "NexusFS daemon stopped cleanly."
+        );
 
         return 0;
     }

@@ -1391,7 +1391,7 @@ HttpRouter::HttpRouter(
     }
 }
 
-HttpRouter::Response HttpRouter::route(
+HttpRouter::Response HttpRouter::route_application(
     const Request& request
 ) const
 {

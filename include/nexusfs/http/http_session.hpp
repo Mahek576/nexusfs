@@ -44,15 +44,17 @@ public:
      * - the response requires closure;
      * - a network error occurs; or
      * - stop() requests shutdown.
+     *
+     * Each successfully parsed request contributes method, route,
+     * response-status and end-to-end latency metrics.
      */
     void run();
 
     /*
      * Interrupts the connection.
      *
-     * This method is noexcept and idempotent. It may be called
-     * from the HTTP server lifecycle thread while run() is
-     * executing in the session worker thread.
+     * This method is noexcept and idempotent. It may be called from
+     * the server lifecycle thread while run() executes in a worker.
      */
     void stop() noexcept;
 
@@ -60,11 +62,25 @@ public:
     stop_requested() const noexcept;
 
 private:
+    /*
+     * Closes the active-connection metric exactly once.
+     *
+     * run() normally performs this when the session ends. The
+     * destructor provides a fallback for sessions that never run.
+     */
+    void close_connection_metric() noexcept;
+
     boost::beast::tcp_stream stream_;
     HttpRouter router_;
+
     std::atomic<bool> stop_requested_{
         false
     };
+
+    std::atomic<bool>
+        connection_metric_closed_{
+            false
+        };
 };
 
 }
