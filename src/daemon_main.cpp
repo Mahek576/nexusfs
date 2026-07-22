@@ -1,4 +1,5 @@
 #include "nexusfs/app/nexusfs_service.hpp"
+#include "nexusfs/cluster/cluster_node_foundation.hpp"
 #include "nexusfs/daemon/daemon_configuration.hpp"
 #include "nexusfs/http/http_router.hpp"
 #include "nexusfs/http/http_server.hpp"
@@ -195,6 +196,58 @@ int main(
             }
         );
 
+        const auto cluster_node =
+            nexusfs::cluster::
+                ClusterNodeFoundation::
+                    load_or_create(
+                        configuration.storage_root,
+                        configuration.address,
+                        configuration.port
+                    );
+
+        logger->log(
+            nexusfs::observability::
+                LogLevel::info,
+            "cluster_node_initialized",
+            "NexusFS cluster node initialized.",
+            {
+                nexusfs::observability::LogField{
+                    "cluster_id",
+                    cluster_node
+                        ->configuration()
+                        .cluster_id
+                },
+                nexusfs::observability::LogField{
+                    "node_id",
+                    cluster_node
+                        ->identity()
+                        .node_id
+                },
+                nexusfs::observability::LogField{
+                    "advertise_address",
+                    cluster_node
+                        ->configuration()
+                        .advertise_address
+                },
+                nexusfs::observability::LogField{
+                    "advertise_port",
+                    static_cast<std::uint64_t>(
+                        cluster_node
+                            ->configuration()
+                            .advertise_port
+                    )
+                },
+                nexusfs::observability::LogField{
+                    "configured_peers",
+                    static_cast<std::uint64_t>(
+                        cluster_node
+                            ->configuration()
+                            .peers.size()
+                    )
+                }
+            }
+        );
+
         const auto service =
             std::make_shared<
                 nexusfs::app::NexusFsService
@@ -206,7 +259,8 @@ int main(
         const nexusfs::http::HttpRouter router{
             service,
             metrics_registry,
-            logger
+            logger,
+            cluster_node
         };
 
         nexusfs::http::HttpServer server{

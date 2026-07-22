@@ -23,8 +23,10 @@ add_library(
     STATIC
         src/app/nexusfs_service.cpp
         src/cli/command_line.cpp
+        src/cluster/cluster_node_foundation.cpp
         src/daemon/daemon_configuration.cpp
         src/http/http_router.cpp
+        src/http/http_router_cluster.cpp
         src/http/http_router_observability.cpp
         src/http/http_router_logging.cpp
         src/http/http_server.cpp
@@ -92,6 +94,54 @@ target_link_libraries(
 )
 
 if(BUILD_TESTING)
+    add_executable(
+        nexusfs_http_cluster_tests
+        tests/test_http_cluster.cpp
+    )
+
+    target_link_libraries(
+        nexusfs_http_cluster_tests
+        PRIVATE
+            nexusfs_core
+            nlohmann_json::nlohmann_json
+            Threads::Threads
+    )
+
+    add_test(
+        NAME nexusfs_http_cluster_tests
+        COMMAND nexusfs_http_cluster_tests
+    )
+
+    set_tests_properties(
+        nexusfs_http_cluster_tests
+        PROPERTIES
+            TIMEOUT 30
+    )
+
+    add_executable(
+        nexusfs_cluster_node_foundation_tests
+        tests/test_cluster_node_foundation.cpp
+    )
+
+    target_link_libraries(
+        nexusfs_cluster_node_foundation_tests
+        PRIVATE
+            nexusfs_core
+            nlohmann_json::nlohmann_json
+            Threads::Threads
+    )
+
+    add_test(
+        NAME nexusfs_cluster_node_foundation_tests
+        COMMAND nexusfs_cluster_node_foundation_tests
+    )
+
+    set_tests_properties(
+        nexusfs_cluster_node_foundation_tests
+        PROPERTIES
+            TIMEOUT 30
+    )
+
     add_executable(
         nexusfs_storage_recovery_tests
         tests/test_storage_recovery.cpp
@@ -422,6 +472,20 @@ if(MSVC)
 
     if(BUILD_TESTING)
         target_compile_options(
+            nexusfs_http_cluster_tests
+            PRIVATE
+                /W4
+                /permissive-
+        )
+
+        target_compile_options(
+            nexusfs_cluster_node_foundation_tests
+            PRIVATE
+                /W4
+                /permissive-
+        )
+
+        target_compile_options(
             nexusfs_storage_recovery_tests
             PRIVATE
                 /W4
@@ -548,6 +612,22 @@ else()
     )
 
     if(BUILD_TESTING)
+        target_compile_options(
+            nexusfs_http_cluster_tests
+            PRIVATE
+                -Wall
+                -Wextra
+                -Wpedantic
+        )
+
+        target_compile_options(
+            nexusfs_cluster_node_foundation_tests
+            PRIVATE
+                -Wall
+                -Wextra
+                -Wpedantic
+        )
+
         target_compile_options(
             nexusfs_storage_recovery_tests
             PRIVATE

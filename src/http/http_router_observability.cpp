@@ -29,6 +29,14 @@ constexpr std::string_view metrics_route{
     "/api/v1/metrics"
 };
 
+constexpr std::string_view cluster_route{
+    "/api/v1/cluster"
+};
+
+constexpr std::string_view cluster_heartbeat_route{
+    "/api/v1/cluster/heartbeat"
+};
+
 constexpr std::string_view files_route{
     "/api/v1/files"
 };
@@ -905,6 +913,16 @@ std::string_view HttpRouter::normalized_route(
     if (target == metrics_route)
     {
         return metrics_route;
+    }
+
+    if (target == cluster_route)
+    {
+        return cluster_route;
+    }
+
+    if (target == cluster_heartbeat_route)
+    {
+        return cluster_heartbeat_route;
     }
 
     if (target == files_route)
