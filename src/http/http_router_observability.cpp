@@ -37,12 +37,28 @@ constexpr std::string_view cluster_heartbeat_route{
     "/api/v1/cluster/heartbeat"
 };
 
+constexpr std::string_view cluster_catalog_route{
+    "/api/v1/cluster/catalog"
+};
+
+constexpr std::string_view cluster_catalog_sync_route{
+    "/api/v1/cluster/catalog/sync"
+};
+
 constexpr std::string_view cluster_chunk_prefix{
     "/api/v1/cluster/chunks/"
 };
 
 constexpr std::string_view normalized_cluster_chunk_route{
     "/api/v1/cluster/chunks/{chunk_hash}"
+};
+
+constexpr std::string_view cluster_manifest_prefix{
+    "/api/v1/cluster/manifests/"
+};
+
+constexpr std::string_view normalized_cluster_manifest_route{
+    "/api/v1/cluster/manifests/{manifest_id}"
 };
 
 constexpr std::string_view files_route{
@@ -690,6 +706,106 @@ HttpRouter::Response make_metrics_response(
                     }
                 },
                 {
+                    "metadata",
+                    {
+                        {
+                            "publications",
+                            {
+                                {
+                                    "total",
+                                    snapshot.metadata_publications_total
+                                },
+                                {
+                                    "succeeded",
+                                    snapshot
+                                        .metadata_publications_succeeded
+                                },
+                                {
+                                    "failed",
+                                    snapshot.metadata_publications_failed
+                                }
+                            }
+                        },
+                        {
+                            "remote_reads",
+                            {
+                                {
+                                    "total",
+                                    snapshot.remote_manifest_reads_total
+                                },
+                                {
+                                    "succeeded",
+                                    snapshot
+                                        .remote_manifest_reads_succeeded
+                                },
+                                {
+                                    "failed",
+                                    snapshot.remote_manifest_reads_failed
+                                }
+                            }
+                        },
+                        {
+                            "local_repairs",
+                            snapshot.local_manifest_repairs_total
+                        },
+                        {
+                            "catalog_synchronization",
+                            {
+                                {
+                                    "runs",
+                                    snapshot
+                                        .metadata_catalog_sync_runs_total
+                                },
+                                {
+                                    "converged",
+                                    snapshot
+                                        .metadata_catalog_sync_converged_total
+                                },
+                                {
+                                    "incomplete",
+                                    snapshot
+                                        .metadata_catalog_sync_incomplete_total
+                                },
+                                {
+                                    "peers_contacted",
+                                    snapshot
+                                        .metadata_catalog_peers_contacted
+                                },
+                                {
+                                    "peers_succeeded",
+                                    snapshot
+                                        .metadata_catalog_peers_succeeded
+                                },
+                                {
+                                    "peers_failed",
+                                    snapshot
+                                        .metadata_catalog_peers_failed
+                                },
+                                {
+                                    "entries_observed",
+                                    snapshot
+                                        .metadata_catalog_entries_observed
+                                },
+                                {
+                                    "manifests_recovered",
+                                    snapshot
+                                        .metadata_catalog_manifests_recovered
+                                },
+                                {
+                                    "manifests_unrecovered",
+                                    snapshot
+                                        .metadata_catalog_manifests_unrecovered
+                                },
+                                {
+                                    "conflicts",
+                                    snapshot
+                                        .metadata_catalog_conflicts
+                                }
+                            }
+                        }
+                    }
+                },
+                {
                     "recovery",
                     {
                         {
@@ -1065,6 +1181,16 @@ std::string_view HttpRouter::normalized_route(
         return cluster_heartbeat_route;
     }
 
+    if (target == cluster_catalog_sync_route)
+    {
+        return cluster_catalog_sync_route;
+    }
+
+    if (target == cluster_catalog_route)
+    {
+        return cluster_catalog_route;
+    }
+
     if (
         target.starts_with(
             cluster_chunk_prefix
@@ -1080,6 +1206,24 @@ std::string_view HttpRouter::normalized_route(
             chunk_hash
         )
             ? normalized_cluster_chunk_route
+            : unmatched_route;
+    }
+
+    if (
+        target.starts_with(
+            cluster_manifest_prefix
+        )
+    )
+    {
+        const std::string_view manifest_id =
+            target.substr(
+                cluster_manifest_prefix.size()
+            );
+
+        return is_lowercase_sha256_identifier(
+            manifest_id
+        )
+            ? normalized_cluster_manifest_route
             : unmatched_route;
     }
 

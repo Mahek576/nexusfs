@@ -258,6 +258,29 @@ struct MetricsRegistry::State
     Counter replica_maintenance_scheduler_stops_total{0};
     Counter replica_maintenance_scheduler_failures_total{0};
 
+    Counter metadata_publications_total{0};
+    Counter metadata_publications_succeeded{0};
+    Counter metadata_publications_failed{0};
+
+    Counter remote_manifest_reads_total{0};
+    Counter remote_manifest_reads_succeeded{0};
+    Counter remote_manifest_reads_failed{0};
+
+    Counter local_manifest_repairs_total{0};
+
+    Counter metadata_catalog_sync_runs_total{0};
+    Counter metadata_catalog_sync_converged_total{0};
+    Counter metadata_catalog_sync_incomplete_total{0};
+
+    Counter metadata_catalog_peers_contacted{0};
+    Counter metadata_catalog_peers_succeeded{0};
+    Counter metadata_catalog_peers_failed{0};
+
+    Counter metadata_catalog_entries_observed{0};
+    Counter metadata_catalog_manifests_recovered{0};
+    Counter metadata_catalog_manifests_unrecovered{0};
+    Counter metadata_catalog_conflicts{0};
+
     mutable std::mutex dimensions_mutex;
 
     std::unordered_map<
@@ -733,6 +756,129 @@ record_replica_maintenance_scheduler_failure()
     );
 }
 
+void MetricsRegistry::record_metadata_publication(
+    bool succeeded
+) noexcept
+{
+    increment_counter(
+        state_->metadata_publications_total
+    );
+
+    if (succeeded)
+    {
+        increment_counter(
+            state_->
+                metadata_publications_succeeded
+        );
+    }
+    else
+    {
+        increment_counter(
+            state_->metadata_publications_failed
+        );
+    }
+}
+
+void MetricsRegistry::record_remote_manifest_read(
+    bool succeeded
+) noexcept
+{
+    increment_counter(
+        state_->remote_manifest_reads_total
+    );
+
+    if (succeeded)
+    {
+        increment_counter(
+            state_->
+                remote_manifest_reads_succeeded
+        );
+    }
+    else
+    {
+        increment_counter(
+            state_->remote_manifest_reads_failed
+        );
+    }
+}
+
+void MetricsRegistry::record_local_manifest_repair()
+    noexcept
+{
+    increment_counter(
+        state_->local_manifest_repairs_total
+    );
+}
+
+void MetricsRegistry::record_metadata_catalog_sync(
+    std::uint64_t peers_contacted,
+    std::uint64_t peers_succeeded,
+    std::uint64_t entries_observed,
+    std::uint64_t manifests_recovered,
+    std::uint64_t manifests_unrecovered,
+    std::uint64_t conflicts,
+    bool converged
+) noexcept
+{
+    increment_counter(
+        state_->metadata_catalog_sync_runs_total
+    );
+
+    if (converged)
+    {
+        increment_counter(
+            state_->
+                metadata_catalog_sync_converged_total
+        );
+    }
+    else
+    {
+        increment_counter(
+            state_->
+                metadata_catalog_sync_incomplete_total
+        );
+    }
+
+    add_to_counter(
+        state_->metadata_catalog_peers_contacted,
+        peers_contacted
+    );
+
+    add_to_counter(
+        state_->metadata_catalog_peers_succeeded,
+        peers_succeeded
+    );
+
+    add_to_counter(
+        state_->metadata_catalog_peers_failed,
+        peers_contacted >= peers_succeeded
+            ? peers_contacted - peers_succeeded
+            : 0
+    );
+
+    add_to_counter(
+        state_->metadata_catalog_entries_observed,
+        entries_observed
+    );
+
+    add_to_counter(
+        state_->
+            metadata_catalog_manifests_recovered,
+        manifests_recovered
+    );
+
+    add_to_counter(
+        state_->
+            metadata_catalog_manifests_unrecovered,
+        manifests_unrecovered
+    );
+
+    add_to_counter(
+        state_->metadata_catalog_conflicts,
+        conflicts
+    );
+}
+
 MetricsSnapshot MetricsRegistry::snapshot() const
 {
     MetricsSnapshot result;
@@ -1040,6 +1186,103 @@ MetricsSnapshot MetricsRegistry::snapshot() const
     result.replica_maintenance_scheduler_failures_total =
         state_->
             replica_maintenance_scheduler_failures_total.load(
+                std::memory_order_relaxed
+            );
+
+    result.metadata_publications_total =
+        state_->metadata_publications_total.load(
+            std::memory_order_relaxed
+        );
+
+    result.metadata_publications_succeeded =
+        state_->
+            metadata_publications_succeeded.load(
+                std::memory_order_relaxed
+            );
+
+    result.metadata_publications_failed =
+        state_->metadata_publications_failed.load(
+            std::memory_order_relaxed
+        );
+
+    result.remote_manifest_reads_total =
+        state_->remote_manifest_reads_total.load(
+            std::memory_order_relaxed
+        );
+
+    result.remote_manifest_reads_succeeded =
+        state_->
+            remote_manifest_reads_succeeded.load(
+                std::memory_order_relaxed
+            );
+
+    result.remote_manifest_reads_failed =
+        state_->remote_manifest_reads_failed.load(
+            std::memory_order_relaxed
+        );
+
+    result.local_manifest_repairs_total =
+        state_->local_manifest_repairs_total.load(
+            std::memory_order_relaxed
+        );
+
+    result.metadata_catalog_sync_runs_total =
+        state_->
+            metadata_catalog_sync_runs_total.load(
+                std::memory_order_relaxed
+            );
+
+    result.metadata_catalog_sync_converged_total =
+        state_->
+            metadata_catalog_sync_converged_total.load(
+                std::memory_order_relaxed
+            );
+
+    result.metadata_catalog_sync_incomplete_total =
+        state_->
+            metadata_catalog_sync_incomplete_total.load(
+                std::memory_order_relaxed
+            );
+
+    result.metadata_catalog_peers_contacted =
+        state_->
+            metadata_catalog_peers_contacted.load(
+                std::memory_order_relaxed
+            );
+
+    result.metadata_catalog_peers_succeeded =
+        state_->
+            metadata_catalog_peers_succeeded.load(
+                std::memory_order_relaxed
+            );
+
+    result.metadata_catalog_peers_failed =
+        state_->
+            metadata_catalog_peers_failed.load(
+                std::memory_order_relaxed
+            );
+
+    result.metadata_catalog_entries_observed =
+        state_->
+            metadata_catalog_entries_observed.load(
+                std::memory_order_relaxed
+            );
+
+    result.metadata_catalog_manifests_recovered =
+        state_->
+            metadata_catalog_manifests_recovered.load(
+                std::memory_order_relaxed
+            );
+
+    result.metadata_catalog_manifests_unrecovered =
+        state_->
+            metadata_catalog_manifests_unrecovered.load(
+                std::memory_order_relaxed
+            );
+
+    result.metadata_catalog_conflicts =
+        state_->
+            metadata_catalog_conflicts.load(
                 std::memory_order_relaxed
             );
 

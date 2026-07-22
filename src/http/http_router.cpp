@@ -1403,7 +1403,13 @@ HttpRouter::Response HttpRouter::route_application(
         || target ==
             "/api/v1/cluster/heartbeat"
         || target.starts_with(
+            "/api/v1/cluster/catalog"
+        )
+        || target.starts_with(
             "/api/v1/cluster/chunks/"
+        )
+        || target.starts_with(
+            "/api/v1/cluster/manifests/"
         )
     )
     {

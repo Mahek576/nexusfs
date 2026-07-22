@@ -1,6 +1,8 @@
 #include "nexusfs/app/nexusfs_service.hpp"
 
 #include "nexusfs/cluster/peer_transport.hpp"
+#include "nexusfs/cluster/metadata_coordinator.hpp"
+#include "nexusfs/cluster/metadata_catalog_synchronizer.hpp"
 #include "nexusfs/cluster/replica_repair.hpp"
 #include "nexusfs/cluster/replica_maintenance.hpp"
 #include "nexusfs/observability/json_logger.hpp"
@@ -475,6 +477,30 @@ NexusFsService::NexusFsService(
 
     if (cluster_node)
     {
+        metadata_coordinator_ =
+            std::make_shared<
+                cluster::MetadataCoordinator
+            >(
+                cluster_node,
+                std::chrono::milliseconds{
+                    3000
+                },
+                metrics_registry,
+                logger
+            );
+
+        metadata_catalog_synchronizer_ =
+            std::make_shared<
+                cluster::MetadataCatalogSynchronizer
+            >(
+                cluster_node,
+                std::chrono::milliseconds{
+                    3000
+                },
+                metrics_registry,
+                logger
+            );
+
         replica_repair_coordinator_ =
             std::make_shared<
                 cluster::ReplicaRepairCoordinator
@@ -543,11 +569,87 @@ NexusFsService::NexusFsService(
     (void)manifest_store;
 }
 
+void NexusFsService::repair_missing_manifest(
+    const std::string& manifest_id
+) const
+{
+    if (!metadata_coordinator_)
+    {
+        return;
+    }
+
+    const std::unique_lock storage_lock{
+        concurrency_state_->
+            storage_mutex
+    };
+
+    storage::ManifestStore manifest_store{
+        storage_root_
+    };
+
+    if (
+        manifest_store.contains(
+            manifest_id
+        )
+    )
+    {
+        (void)load_canonical_manifest(
+            manifest_store,
+            manifest_id
+        );
+
+        return;
+    }
+
+    const cluster::ManifestRecoveryReport report =
+        metadata_coordinator_->
+            recover_manifest(
+                manifest_id,
+                manifest_store
+            );
+
+    if (!report.recovered)
+    {
+        std::string message =
+            "Missing manifest could not be recovered: "
+            + manifest_id
+            + ". Attempted "
+            + std::to_string(
+                report.owner_attempts
+            )
+            + " ordered metadata owners.";
+
+        if (!report.failures.empty())
+        {
+            message +=
+                " First owner failure: "
+                + report.failures.front()
+                    .peer_node_id
+                + " - "
+                + report.failures.front()
+                    .error;
+        }
+
+        throw std::runtime_error(
+            message
+        );
+    }
+
+    (void)load_canonical_manifest(
+        manifest_store,
+        manifest_id
+    );
+}
+
 void NexusFsService::
 repair_missing_manifest_chunks(
     const std::string& manifest_id
 ) const
 {
+    repair_missing_manifest(
+        manifest_id
+    );
+
     if (!replica_repair_coordinator_)
     {
         return;
@@ -786,12 +888,59 @@ StoreFileResult NexusFsService::store_file(
         }
     }
 
-    const storage::ManifestStoreResult
-        manifest_store_result =
-            manifest_store.store(
-                manifest_id,
-                encoded_manifest
-            );
+    bool manifest_stored =
+        false;
+
+    std::string metadata_owner_node_id;
+
+    bool metadata_owner_local =
+        true;
+
+    bool metadata_owner_acknowledged =
+        true;
+
+    if (metadata_coordinator_)
+    {
+        const cluster::MetadataPublicationReport
+            metadata_report =
+                metadata_coordinator_->
+                    publish_manifest(
+                        manifest_id,
+                        encoded_manifest,
+                        manifest_store
+                    );
+
+        manifest_stored =
+            metadata_report
+                .local_cache_created;
+
+        metadata_owner_node_id =
+            metadata_report
+                .owner
+                .node_id;
+
+        metadata_owner_local =
+            metadata_report
+                .owner
+                .local;
+
+        metadata_owner_acknowledged =
+            metadata_report
+                .owner_acknowledged;
+    }
+    else
+    {
+        const storage::ManifestStoreResult
+            manifest_store_result =
+                manifest_store.store(
+                    manifest_id,
+                    encoded_manifest
+                );
+
+        manifest_stored =
+            manifest_store_result ==
+            storage::ManifestStoreResult::stored;
+    }
 
     const LoadedManifest loaded_manifest =
         load_canonical_manifest(
@@ -824,11 +973,13 @@ StoreFileResult NexusFsService::store_file(
         chunks_reused,
         manifest.file_size(),
         encoded_manifest.size(),
-        manifest_store_result ==
-            storage::ManifestStoreResult::stored,
+        manifest_stored,
         replication_factor_,
         remote_replica_acknowledgements,
-        replication_satisfied
+        replication_satisfied,
+        metadata_owner_node_id,
+        metadata_owner_local,
+        metadata_owner_acknowledged
     };
 }
 
@@ -921,6 +1072,13 @@ InspectFileResult NexusFsService::inspect_file(
     {
         throw std::invalid_argument(
             "Inspect manifest ID cannot be empty."
+        );
+    }
+
+    if (metadata_coordinator_)
+    {
+        repair_missing_manifest(
+            manifest_id
         );
     }
 
@@ -1170,6 +1328,107 @@ ListFilesResult NexusFsService::list_files() const
         std::move(files),
         complete_manifests,
         incomplete_manifests
+    };
+}
+
+SynchronizeMetadataCatalogResult
+NexusFsService::synchronize_metadata_catalog() const
+{
+    if (!metadata_catalog_synchronizer_)
+    {
+        throw std::runtime_error(
+            "Metadata catalog synchronization requires "
+            "cluster services."
+        );
+    }
+
+    /*
+     * Synchronization may durably publish recovered manifests.
+     * The entire additive operation therefore uses the exclusive
+     * process-wide storage lock.
+     */
+    const std::unique_lock storage_lock{
+        concurrency_state_->
+            storage_mutex
+    };
+
+    storage::ManifestStore manifest_store{
+        storage_root_
+    };
+
+    const storage::ChunkStore chunk_store{
+        storage_root_
+    };
+
+    const cluster::MetadataCatalogSyncReport report =
+        metadata_catalog_synchronizer_->
+            synchronize(
+                manifest_store
+            );
+
+    std::vector<StoredFileSummary> files;
+
+    files.reserve(
+        report.synchronized_entries.size()
+    );
+
+    for (
+        const cluster::MetadataCatalogEntry& entry :
+        report.synchronized_entries
+    )
+    {
+        const LoadedManifest loaded_manifest =
+            load_canonical_manifest(
+                manifest_store,
+                entry.manifest_id
+            );
+
+        std::size_t missing_chunks = 0;
+
+        for (
+            const std::string& chunk_hash :
+            loaded_manifest.manifest
+                .chunk_hashes()
+        )
+        {
+            if (
+                !chunk_store.contains(
+                    chunk_hash
+                )
+            )
+            {
+                ++missing_chunks;
+            }
+        }
+
+        files.push_back(
+            StoredFileSummary{
+                entry.manifest_id,
+                entry.original_filename,
+                entry.file_size,
+                static_cast<std::size_t>(
+                    entry.chunk_size
+                ),
+                static_cast<std::size_t>(
+                    entry.chunk_count
+                ),
+                missing_chunks
+            }
+        );
+    }
+
+    return SynchronizeMetadataCatalogResult{
+        std::move(files),
+        report.peers_contacted,
+        report.peers_succeeded,
+        report.peers_failed,
+        report.remote_entries_observed,
+        report.unique_entries_discovered,
+        report.manifests_already_local,
+        report.manifests_recovered,
+        report.manifests_unrecovered,
+        report.conflicts_detected,
+        report.converged
     };
 }
 

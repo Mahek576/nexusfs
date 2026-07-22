@@ -12,6 +12,8 @@ namespace nexusfs::cluster
 {
 
 class ClusterNodeFoundation;
+class MetadataCatalogSynchronizer;
+class MetadataCoordinator;
 class ReplicaMaintenanceCoordinator;
 class ReplicaRepairCoordinator;
 class ReplicationCoordinator;
@@ -45,6 +47,10 @@ struct StoreFileResult
     std::size_t replication_factor;
     std::size_t remote_replica_acknowledgements;
     bool replication_satisfied;
+
+    std::string metadata_owner_node_id;
+    bool metadata_owner_local;
+    bool metadata_owner_acknowledged;
 };
 
 struct RestoreFileResult
@@ -109,6 +115,26 @@ struct ListFilesResult
     std::vector<StoredFileSummary> files;
     std::size_t complete_manifests;
     std::size_t incomplete_manifests;
+};
+
+struct SynchronizeMetadataCatalogResult
+{
+    std::vector<StoredFileSummary> files;
+
+    std::size_t peers_contacted;
+    std::size_t peers_succeeded;
+    std::size_t peers_failed;
+
+    std::size_t remote_entries_observed;
+    std::size_t unique_entries_discovered;
+
+    std::size_t manifests_already_local;
+    std::size_t manifests_recovered;
+    std::size_t manifests_unrecovered;
+
+    std::size_t conflicts_detected;
+
+    bool converged;
 };
 
 struct RepairReplicasResult
@@ -193,6 +219,9 @@ public:
 
     [[nodiscard]] ListFilesResult list_files() const;
 
+    [[nodiscard]] SynchronizeMetadataCatalogResult
+    synchronize_metadata_catalog() const;
+
     [[nodiscard]] RepairReplicasResult
     repair_replicas() const;
 
@@ -215,6 +244,14 @@ private:
     };
 
     std::shared_ptr<
+        cluster::MetadataCatalogSynchronizer
+    > metadata_catalog_synchronizer_;
+
+    std::shared_ptr<
+        cluster::MetadataCoordinator
+    > metadata_coordinator_;
+
+    std::shared_ptr<
         cluster::ReplicationCoordinator
     > replication_coordinator_;
 
@@ -225,6 +262,10 @@ private:
     std::shared_ptr<
         cluster::ReplicaMaintenanceCoordinator
     > replica_maintenance_coordinator_;
+
+    void repair_missing_manifest(
+        const std::string& manifest_id
+    ) const;
 
     void repair_missing_manifest_chunks(
         const std::string& manifest_id

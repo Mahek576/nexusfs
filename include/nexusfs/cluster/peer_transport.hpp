@@ -2,6 +2,7 @@
 #define NEXUSFS_CLUSTER_PEER_TRANSPORT_HPP
 
 #include "nexusfs/cluster/cluster_node_foundation.hpp"
+#include "nexusfs/cluster/metadata_catalog.hpp"
 
 #include <chrono>
 #include <cstddef>
@@ -22,6 +23,12 @@ namespace nexusfs::cluster
 {
 
 enum class RemoteChunkStoreResult
+{
+    stored,
+    already_exists
+};
+
+enum class RemoteManifestStoreResult
 {
     stored,
     already_exists
@@ -69,6 +76,29 @@ public:
 
     void send_heartbeat(
         const PeerDefinition& peer
+    );
+
+    [[nodiscard]] MetadataCatalogSnapshot
+    load_catalog(
+        const PeerDefinition& peer
+    );
+
+    [[nodiscard]] bool manifest_exists(
+        const PeerDefinition& peer,
+        const std::string& manifest_id
+    );
+
+    [[nodiscard]] RemoteManifestStoreResult
+    store_manifest(
+        const PeerDefinition& peer,
+        const std::string& manifest_id,
+        const std::vector<std::uint8_t>& encoded_manifest
+    );
+
+    [[nodiscard]] std::vector<std::uint8_t>
+    load_manifest(
+        const PeerDefinition& peer,
+        const std::string& manifest_id
     );
 
     [[nodiscard]] bool chunk_exists(
