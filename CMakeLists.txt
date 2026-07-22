@@ -25,8 +25,12 @@ add_library(
         src/cli/command_line.cpp
         src/daemon/daemon_configuration.cpp
         src/http/http_router.cpp
+        src/http/http_router_observability.cpp
+        src/http/http_router_logging.cpp
         src/http/http_server.cpp
         src/http/http_session.cpp
+        src/observability/json_logger.cpp
+        src/observability/metrics_registry.cpp
         src/storage/chunker.cpp
         src/storage/sha256_hasher.cpp
         src/storage/chunk_store.cpp
@@ -229,6 +233,121 @@ if(BUILD_TESTING)
         PROPERTIES
             TIMEOUT 60
     )
+
+    add_executable(
+        nexusfs_json_logger_tests
+        tests/test_json_logger.cpp
+    )
+
+    target_link_libraries(
+        nexusfs_json_logger_tests
+        PRIVATE
+            nexusfs_core
+            nlohmann_json::nlohmann_json
+            Threads::Threads
+    )
+
+    add_test(
+        NAME nexusfs_json_logger_tests
+        COMMAND nexusfs_json_logger_tests
+    )
+
+    set_tests_properties(
+        nexusfs_json_logger_tests
+        PROPERTIES
+            TIMEOUT 30
+    )
+    add_executable(
+        nexusfs_metrics_registry_tests
+        tests/test_metrics_registry.cpp
+    )
+
+    target_link_libraries(
+        nexusfs_metrics_registry_tests
+        PRIVATE
+            nexusfs_core
+            Threads::Threads
+    )
+
+    add_test(
+        NAME nexusfs_metrics_registry_tests
+        COMMAND nexusfs_metrics_registry_tests
+    )
+
+    set_tests_properties(
+        nexusfs_metrics_registry_tests
+        PROPERTIES
+            TIMEOUT 30
+    )
+
+    add_executable(
+        nexusfs_http_logging_tests
+        tests/test_http_logging.cpp
+    )
+
+    target_link_libraries(
+        nexusfs_http_logging_tests
+        PRIVATE
+            nexusfs_core
+            nlohmann_json::nlohmann_json
+            Threads::Threads
+    )
+
+    add_test(
+        NAME nexusfs_http_logging_tests
+        COMMAND nexusfs_http_logging_tests
+    )
+
+    set_tests_properties(
+        nexusfs_http_logging_tests
+        PROPERTIES
+            TIMEOUT 30
+    )
+    add_executable(
+        nexusfs_http_metrics_tests
+        tests/test_http_metrics.cpp
+    )
+
+    target_link_libraries(
+        nexusfs_http_metrics_tests
+        PRIVATE
+            nexusfs_core
+            Threads::Threads
+    )
+
+    add_test(
+        NAME nexusfs_http_metrics_tests
+        COMMAND nexusfs_http_metrics_tests
+    )
+
+    set_tests_properties(
+        nexusfs_http_metrics_tests
+        PROPERTIES
+            TIMEOUT 30
+    )
+    add_executable(
+        nexusfs_metrics_endpoint_tests
+        tests/test_metrics_endpoint.cpp
+    )
+
+    target_link_libraries(
+        nexusfs_metrics_endpoint_tests
+        PRIVATE
+            nexusfs_core
+            nlohmann_json::nlohmann_json
+            Threads::Threads
+    )
+
+    add_test(
+        NAME nexusfs_metrics_endpoint_tests
+        COMMAND nexusfs_metrics_endpoint_tests
+    )
+
+    set_tests_properties(
+        nexusfs_metrics_endpoint_tests
+        PROPERTIES
+            TIMEOUT 30
+    )
 endif()
 
 if(MSVC)
@@ -305,6 +424,38 @@ if(MSVC)
 
         target_compile_options(
             nexusfs_service_concurrency_tests
+            PRIVATE
+                /W4
+                /permissive-
+        )
+
+        target_compile_options(
+            nexusfs_json_logger_tests
+            PRIVATE
+                /W4
+                /permissive-
+        )
+        target_compile_options(
+            nexusfs_metrics_registry_tests
+            PRIVATE
+                /W4
+                /permissive-
+        )
+
+        target_compile_options(
+            nexusfs_http_logging_tests
+            PRIVATE
+                /W4
+                /permissive-
+        )
+        target_compile_options(
+            nexusfs_http_metrics_tests
+            PRIVATE
+                /W4
+                /permissive-
+        )
+        target_compile_options(
+            nexusfs_metrics_endpoint_tests
             PRIVATE
                 /W4
                 /permissive-
@@ -394,6 +545,43 @@ else()
 
         target_compile_options(
             nexusfs_service_concurrency_tests
+            PRIVATE
+                -Wall
+                -Wextra
+                -Wpedantic
+        )
+
+        target_compile_options(
+            nexusfs_json_logger_tests
+            PRIVATE
+                -Wall
+                -Wextra
+                -Wpedantic
+        )
+        target_compile_options(
+            nexusfs_metrics_registry_tests
+            PRIVATE
+                -Wall
+                -Wextra
+                -Wpedantic
+        )
+
+        target_compile_options(
+            nexusfs_http_logging_tests
+            PRIVATE
+                -Wall
+                -Wextra
+                -Wpedantic
+        )
+        target_compile_options(
+            nexusfs_http_metrics_tests
+            PRIVATE
+                -Wall
+                -Wextra
+                -Wpedantic
+        )
+        target_compile_options(
+            nexusfs_metrics_endpoint_tests
             PRIVATE
                 -Wall
                 -Wextra
