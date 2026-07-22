@@ -1,5 +1,6 @@
 #include "nexusfs/app/nexusfs_service.hpp"
 
+#include "nexusfs/cluster/peer_transport.hpp"
 #include "nexusfs/storage/chunk_store.hpp"
 #include "nexusfs/storage/chunker.hpp"
 #include "nexusfs/storage/file_manifest.hpp"
@@ -378,11 +379,36 @@ NexusFsService::NexusFsService(
     std::filesystem::path storage_root,
     std::size_t default_chunk_size
 )
+    : NexusFsService{
+          std::move(storage_root),
+          default_chunk_size,
+          nullptr,
+          1,
+          true
+      }
+{
+}
+
+NexusFsService::NexusFsService(
+    std::filesystem::path storage_root,
+    std::size_t default_chunk_size,
+    std::shared_ptr<
+        cluster::ClusterNodeFoundation
+    > cluster_node,
+    std::size_t replication_factor,
+    bool strict_replication
+)
     : storage_root_{
           std::move(storage_root)
       },
       default_chunk_size_{
           default_chunk_size
+      },
+      replication_factor_{
+          replication_factor
+      },
+      strict_replication_{
+          strict_replication
       }
 {
     if (storage_root_.empty())
@@ -397,6 +423,34 @@ NexusFsService::NexusFsService(
         throw std::invalid_argument(
             "NexusFS default chunk size must be greater than zero."
         );
+    }
+
+    if (replication_factor_ == 0)
+    {
+        throw std::invalid_argument(
+            "NexusFS replication factor must be at least one."
+        );
+    }
+
+    if (
+        replication_factor_ > 1
+        && !cluster_node
+    )
+    {
+        throw std::invalid_argument(
+            "A cluster node is required when the "
+            "replication factor is greater than one."
+        );
+    }
+
+    if (replication_factor_ > 1)
+    {
+        replication_coordinator_ =
+            std::make_shared<
+                cluster::ReplicationCoordinator
+            >(
+                std::move(cluster_node)
+            );
     }
 
     concurrency_state_ =
@@ -479,6 +533,9 @@ StoreFileResult NexusFsService::store_file(
     std::size_t chunks_stored = 0;
     std::size_t chunks_reused = 0;
 
+    std::size_t remote_replica_acknowledgements = 0;
+    std::size_t replication_satisfied_chunks = 0;
+
     for (
         const auto& chunk :
         chunks
@@ -521,6 +578,64 @@ StoreFileResult NexusFsService::store_file(
                 + "."
             );
         }
+
+        if (replication_coordinator_)
+        {
+            const cluster::ReplicationReport report =
+                replication_coordinator_->
+                    replicate_chunk(
+                        chunk.hash,
+                        chunk.data,
+                        replication_factor_
+                    );
+
+            remote_replica_acknowledgements +=
+                report.acknowledged_replicas;
+
+            if (report.satisfied)
+            {
+                ++replication_satisfied_chunks;
+            }
+            else if (strict_replication_)
+            {
+                std::string message =
+                    "Strict chunk replication failed "
+                    "for chunk "
+                    + chunk.hash
+                    + ": acknowledged "
+                    + std::to_string(
+                        report.acknowledged_replicas
+                    )
+                    + " of "
+                    + std::to_string(
+                        report.requested_remote_replicas
+                    )
+                    + " required remote replicas.";
+
+                if (!report.failures.empty())
+                {
+                    message +=
+                        " First peer failure: "
+                        + report.failures.front()
+                            .peer_node_id
+                        + " - "
+                        + report.failures.front()
+                            .error;
+                }
+
+                throw std::runtime_error(
+                    message
+                );
+            }
+        }
+        else
+        {
+            /*
+             * Replication factor one is satisfied by the verified
+             * local content-addressed copy.
+             */
+            ++replication_satisfied_chunks;
+        }
     }
 
     const storage::ManifestStoreResult
@@ -547,6 +662,10 @@ StoreFileResult NexusFsService::store_file(
         );
     }
 
+    const bool replication_satisfied =
+        replication_satisfied_chunks ==
+        chunks.size();
+
     return StoreFileResult{
         source_path,
         manifest_id,
@@ -558,7 +677,10 @@ StoreFileResult NexusFsService::store_file(
         manifest.file_size(),
         encoded_manifest.size(),
         manifest_store_result ==
-            storage::ManifestStoreResult::stored
+            storage::ManifestStoreResult::stored,
+        replication_factor_,
+        remote_replica_acknowledgements,
+        replication_satisfied
     };
 }
 

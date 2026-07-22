@@ -253,7 +253,14 @@ int main(
                 nexusfs::app::NexusFsService
             >(
                 configuration.storage_root,
-                configuration.chunk_size
+                configuration.chunk_size,
+                cluster_node,
+                cluster_node
+                    ->configuration()
+                    .replication_factor,
+                cluster_node
+                    ->configuration()
+                    .strict_replication
             );
 
         const nexusfs::http::HttpRouter router{

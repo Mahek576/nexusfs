@@ -561,6 +561,13 @@ void validate_configuration(
         );
     }
 
+    if (configuration.replication_factor == 0)
+    {
+        throw std::invalid_argument(
+            "Replication factor must be at least one."
+        );
+    }
+
     std::unordered_set<std::string>
         node_ids;
 
@@ -658,6 +665,8 @@ ClusterConfiguration load_or_create_configuration(
             advertise_port,
             1000,
             5000,
+            1,
+            true,
             {}
         };
 
@@ -685,6 +694,14 @@ ClusterConfiguration load_or_create_configuration(
             {
                 "failure_timeout_ms",
                 candidate.failure_timeout_ms
+            },
+            {
+                "replication_factor",
+                candidate.replication_factor
+            },
+            {
+                "strict_replication",
+                candidate.strict_replication
             },
             {
                 "peers",
@@ -756,6 +773,38 @@ ClusterConfiguration load_or_create_configuration(
     configuration.failure_timeout_ms =
         payload.at("failure_timeout_ms")
             .get<std::uint64_t>();
+
+    const std::uint64_t replication_factor_value =
+        payload.value(
+            "replication_factor",
+            static_cast<std::uint64_t>(1)
+        );
+
+    if (
+        replication_factor_value == 0
+        || replication_factor_value >
+            static_cast<std::uint64_t>(
+                std::numeric_limits<
+                    std::size_t
+                >::max()
+            )
+    )
+    {
+        throw std::runtime_error(
+            "Cluster replication factor is invalid."
+        );
+    }
+
+    configuration.replication_factor =
+        static_cast<std::size_t>(
+            replication_factor_value
+        );
+
+    configuration.strict_replication =
+        payload.value(
+            "strict_replication",
+            true
+        );
 
     const nlohmann::json& peers =
         payload.at("peers");
