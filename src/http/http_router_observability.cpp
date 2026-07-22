@@ -37,6 +37,14 @@ constexpr std::string_view cluster_heartbeat_route{
     "/api/v1/cluster/heartbeat"
 };
 
+constexpr std::string_view cluster_chunk_prefix{
+    "/api/v1/cluster/chunks/"
+};
+
+constexpr std::string_view normalized_cluster_chunk_route{
+    "/api/v1/cluster/chunks/{chunk_hash}"
+};
+
 constexpr std::string_view files_route{
     "/api/v1/files"
 };
@@ -923,6 +931,24 @@ std::string_view HttpRouter::normalized_route(
     if (target == cluster_heartbeat_route)
     {
         return cluster_heartbeat_route;
+    }
+
+    if (
+        target.starts_with(
+            cluster_chunk_prefix
+        )
+    )
+    {
+        const std::string_view chunk_hash =
+            target.substr(
+                cluster_chunk_prefix.size()
+            );
+
+        return is_lowercase_sha256_identifier(
+            chunk_hash
+        )
+            ? normalized_cluster_chunk_route
+            : unmatched_route;
     }
 
     if (target == files_route)
