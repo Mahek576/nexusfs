@@ -1,5 +1,6 @@
 #include "nexusfs/storage/chunk_store.hpp"
 
+#include "nexusfs/storage/durable_file.hpp"
 #include "nexusfs/storage/sha256_hasher.hpp"
 
 #include <algorithm>
@@ -587,18 +588,19 @@ StoreResult ChunkStore::store(
             );
         }
 
-        std::error_code rename_error;
+        const DurablePublishResult publication_result =
+            publish_file_durably(
+                temporary_path,
+                final_path
+            );
 
-        std::filesystem::rename(
-            temporary_path,
-            final_path,
-            rename_error
-        );
-
-        if (rename_error)
+        if (
+            publication_result ==
+            DurablePublishResult::destination_exists
+        )
         {
             /*
-             * Another writer may have published the identical
+             * Another writer or process published the identical
              * content-addressed chunk first.
              */
             const auto concurrently_published_data =
@@ -607,30 +609,31 @@ StoreResult ChunkStore::store(
                     chunk.hash
                 );
 
-            if (concurrently_published_data)
+            if (!concurrently_published_data)
             {
-                remove_temporary_file(
-                    temporary_path
+                throw std::runtime_error(
+                    "Chunk destination exists but could not "
+                    "be verified after durable publication: "
+                    + chunk.hash
                 );
-
-                if (
-                    *concurrently_published_data !=
-                    chunk.data
-                )
-                {
-                    throw std::runtime_error(
-                        "Concurrently stored chunk bytes "
-                        "do not match the supplied data."
-                    );
-                }
-
-                return StoreResult::already_exists;
             }
 
-            throw std::runtime_error(
-                "Failed to finalize chunk file: "
-                + rename_error.message()
+            if (
+                *concurrently_published_data !=
+                chunk.data
+            )
+            {
+                throw std::runtime_error(
+                    "Concurrently stored chunk bytes "
+                    "do not match the supplied data."
+                );
+            }
+
+            remove_temporary_file(
+                temporary_path
             );
+
+            return StoreResult::already_exists;
         }
     }
     catch (...)

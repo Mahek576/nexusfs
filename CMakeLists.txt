@@ -31,6 +31,8 @@ add_library(
         src/http/http_session.cpp
         src/observability/json_logger.cpp
         src/observability/metrics_registry.cpp
+        src/storage/durable_file.cpp
+        src/storage/storage_recovery.cpp
         src/storage/chunker.cpp
         src/storage/sha256_hasher.cpp
         src/storage/chunk_store.cpp
@@ -90,6 +92,52 @@ target_link_libraries(
 )
 
 if(BUILD_TESTING)
+    add_executable(
+        nexusfs_storage_recovery_tests
+        tests/test_storage_recovery.cpp
+    )
+
+    target_link_libraries(
+        nexusfs_storage_recovery_tests
+        PRIVATE
+            nexusfs_core
+            nlohmann_json::nlohmann_json
+            Threads::Threads
+    )
+
+    add_test(
+        NAME nexusfs_storage_recovery_tests
+        COMMAND nexusfs_storage_recovery_tests
+    )
+
+    set_tests_properties(
+        nexusfs_storage_recovery_tests
+        PROPERTIES
+            TIMEOUT 30
+    )
+
+    add_executable(
+        nexusfs_durable_file_tests
+        tests/test_durable_file.cpp
+    )
+
+    target_link_libraries(
+        nexusfs_durable_file_tests
+        PRIVATE
+            nexusfs_core
+            Threads::Threads
+    )
+
+    add_test(
+        NAME nexusfs_durable_file_tests
+        COMMAND nexusfs_durable_file_tests
+    )
+
+    set_tests_properties(
+        nexusfs_durable_file_tests
+        PROPERTIES
+            TIMEOUT 30
+    )
     add_executable(
         nexusfs_tests
         tests/test_main.cpp
@@ -374,6 +422,19 @@ if(MSVC)
 
     if(BUILD_TESTING)
         target_compile_options(
+            nexusfs_storage_recovery_tests
+            PRIVATE
+                /W4
+                /permissive-
+        )
+
+        target_compile_options(
+            nexusfs_durable_file_tests
+            PRIVATE
+                /W4
+                /permissive-
+        )
+        target_compile_options(
             nexusfs_tests
             PRIVATE
                 /W4
@@ -487,6 +548,21 @@ else()
     )
 
     if(BUILD_TESTING)
+        target_compile_options(
+            nexusfs_storage_recovery_tests
+            PRIVATE
+                -Wall
+                -Wextra
+                -Wpedantic
+        )
+
+        target_compile_options(
+            nexusfs_durable_file_tests
+            PRIVATE
+                -Wall
+                -Wextra
+                -Wpedantic
+        )
         target_compile_options(
             nexusfs_tests
             PRIVATE

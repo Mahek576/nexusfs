@@ -1,5 +1,7 @@
 #include "nexusfs/storage/file_reconstructor.hpp"
 
+#include "nexusfs/storage/durable_file.hpp"
+
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -395,39 +397,20 @@ ReconstructionResult FileReconstructor::reconstruct(
             output_path
         );
 
-        std::error_code rename_error;
+        const DurablePublishResult publication_result =
+            publish_file_durably(
+                temporary_path,
+                output_path
+            );
 
-        std::filesystem::rename(
-            temporary_path,
-            output_path,
-            rename_error
-        );
-
-        if (rename_error)
+        if (
+            publication_result ==
+            DurablePublishResult::destination_exists
+        )
         {
-            std::error_code existence_error;
-
-            const bool output_exists =
-                std::filesystem::exists(
-                    output_path,
-                    existence_error
-                );
-
-            if (
-                !existence_error
-                && output_exists
-            )
-            {
-                throw std::runtime_error(
-                    "Reconstruction output path "
-                    "already exists: "
-                    + output_path.string()
-                );
-            }
-
             throw std::runtime_error(
-                "Failed to finalize the reconstructed file: "
-                + rename_error.message()
+                "Reconstruction output path already exists: "
+                + output_path.string()
             );
         }
     }

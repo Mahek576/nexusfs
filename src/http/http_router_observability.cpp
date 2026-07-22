@@ -595,6 +595,34 @@ HttpRouter::Response make_metrics_response(
                     snapshot.storage_missing_chunks
                 }
             }
+        },
+        {
+            "recovery",
+            {
+                {
+                    "runs",
+                    snapshot.recovery_runs_total
+                },
+                {
+                    "entries_scanned",
+                    snapshot.recovery_entries_scanned
+                },
+                {
+                    "temporary_entries_found",
+                    snapshot
+                        .recovery_temporary_entries_found
+                },
+                {
+                    "temporary_files_removed",
+                    snapshot
+                        .recovery_temporary_files_removed
+                },
+                {
+                    "non_regular_entries_preserved",
+                    snapshot
+                        .recovery_non_regular_entries_preserved
+                }
+            }
         }
     };
 
