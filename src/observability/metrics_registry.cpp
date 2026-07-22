@@ -289,6 +289,19 @@ struct MetricsRegistry::State
 
     Counter membership_epoch_conflicts_total{0};
 
+    Counter rebalancing_runs_total{0};
+    Counter rebalancing_completed_total{0};
+    Counter rebalancing_replayed_total{0};
+    Counter rebalancing_stale_epoch_total{0};
+    Counter rebalancing_idempotency_conflicts_total{0};
+
+    Counter rebalancing_chunks_scanned{0};
+    Counter rebalancing_targets_planned{0};
+    Counter rebalancing_replicas_observed{0};
+    Counter rebalancing_replicas_created{0};
+    Counter rebalancing_peer_failures{0};
+    Counter rebalancing_under_replicated_chunks{0};
+
     mutable std::mutex dimensions_mutex;
 
     std::unordered_map<
@@ -928,6 +941,89 @@ void MetricsRegistry::record_membership_change(
     }
 }
 
+void MetricsRegistry::record_rebalance_result(
+    std::uint64_t chunks_scanned,
+    std::uint64_t targets_planned,
+    std::uint64_t replicas_observed,
+    std::uint64_t replicas_created,
+    std::uint64_t peer_failures,
+    std::uint64_t under_replicated_chunks,
+    bool completed,
+    bool replayed,
+    bool stale_epoch
+) noexcept
+{
+    increment_counter(
+        state_->rebalancing_runs_total
+    );
+
+    if (completed)
+    {
+        increment_counter(
+            state_->rebalancing_completed_total
+        );
+    }
+
+    if (replayed)
+    {
+        increment_counter(
+            state_->rebalancing_replayed_total
+        );
+    }
+
+    if (stale_epoch)
+    {
+        increment_counter(
+            state_->rebalancing_stale_epoch_total
+        );
+    }
+
+    add_to_counter(
+        state_->rebalancing_chunks_scanned,
+        chunks_scanned
+    );
+
+    add_to_counter(
+        state_->rebalancing_targets_planned,
+        targets_planned
+    );
+
+    add_to_counter(
+        state_->rebalancing_replicas_observed,
+        replicas_observed
+    );
+
+    add_to_counter(
+        state_->rebalancing_replicas_created,
+        replicas_created
+    );
+
+    add_to_counter(
+        state_->rebalancing_peer_failures,
+        peer_failures
+    );
+
+    add_to_counter(
+        state_->
+            rebalancing_under_replicated_chunks,
+        under_replicated_chunks
+    );
+}
+
+void MetricsRegistry::
+record_rebalance_idempotency_conflict()
+    noexcept
+{
+    increment_counter(
+        state_->rebalancing_runs_total
+    );
+
+    increment_counter(
+        state_->
+            rebalancing_idempotency_conflicts_total
+    );
+}
+
 MetricsSnapshot MetricsRegistry::snapshot() const
 {
     MetricsSnapshot result;
@@ -1362,6 +1458,63 @@ MetricsSnapshot MetricsRegistry::snapshot() const
     result.membership_epoch_conflicts_total =
         state_->
             membership_epoch_conflicts_total.load(
+                std::memory_order_relaxed
+            );
+
+    result.rebalancing_runs_total =
+        state_->rebalancing_runs_total.load(
+            std::memory_order_relaxed
+        );
+
+    result.rebalancing_completed_total =
+        state_->rebalancing_completed_total.load(
+            std::memory_order_relaxed
+        );
+
+    result.rebalancing_replayed_total =
+        state_->rebalancing_replayed_total.load(
+            std::memory_order_relaxed
+        );
+
+    result.rebalancing_stale_epoch_total =
+        state_->rebalancing_stale_epoch_total.load(
+            std::memory_order_relaxed
+        );
+
+    result.rebalancing_idempotency_conflicts_total =
+        state_->
+            rebalancing_idempotency_conflicts_total.load(
+                std::memory_order_relaxed
+            );
+
+    result.rebalancing_chunks_scanned =
+        state_->rebalancing_chunks_scanned.load(
+            std::memory_order_relaxed
+        );
+
+    result.rebalancing_targets_planned =
+        state_->rebalancing_targets_planned.load(
+            std::memory_order_relaxed
+        );
+
+    result.rebalancing_replicas_observed =
+        state_->rebalancing_replicas_observed.load(
+            std::memory_order_relaxed
+        );
+
+    result.rebalancing_replicas_created =
+        state_->rebalancing_replicas_created.load(
+            std::memory_order_relaxed
+        );
+
+    result.rebalancing_peer_failures =
+        state_->rebalancing_peer_failures.load(
+            std::memory_order_relaxed
+        );
+
+    result.rebalancing_under_replicated_chunks =
+        state_->
+            rebalancing_under_replicated_chunks.load(
                 std::memory_order_relaxed
             );
 

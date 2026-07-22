@@ -14,6 +14,7 @@ namespace nexusfs::cluster
 class ClusterNodeFoundation;
 class MetadataCatalogSynchronizer;
 class MetadataCoordinator;
+class PlacementRebalancer;
 class ReplicaMaintenanceCoordinator;
 class ReplicaRepairCoordinator;
 class ReplicationCoordinator;
@@ -137,6 +138,31 @@ struct SynchronizeMetadataCatalogResult
     bool converged;
 };
 
+struct RebalanceClusterResult
+{
+    std::string status;
+    std::string operation_id;
+    std::string request_digest;
+
+    std::uint64_t expected_membership_epoch;
+    std::uint64_t observed_membership_epoch;
+    std::uint64_t replication_factor;
+
+    std::uint64_t manifests_scanned;
+    std::uint64_t unique_chunks_scanned;
+    std::uint64_t targets_planned;
+
+    std::uint64_t replicas_observed;
+    std::uint64_t replicas_created;
+
+    std::uint64_t peer_failures;
+    std::uint64_t under_replicated_chunks;
+
+    bool converged;
+    bool replayed;
+    bool applied;
+};
+
 struct RepairReplicasResult
 {
     std::size_t manifests_scanned;
@@ -222,6 +248,12 @@ public:
     [[nodiscard]] SynchronizeMetadataCatalogResult
     synchronize_metadata_catalog() const;
 
+    [[nodiscard]] RebalanceClusterResult
+    rebalance_cluster(
+        std::string operation_id,
+        std::uint64_t expected_membership_epoch
+    ) const;
+
     [[nodiscard]] RepairReplicasResult
     repair_replicas() const;
 
@@ -242,6 +274,10 @@ private:
     bool strict_replication_{
         true
     };
+
+    std::shared_ptr<
+        cluster::PlacementRebalancer
+    > placement_rebalancer_;
 
     std::shared_ptr<
         cluster::MetadataCatalogSynchronizer

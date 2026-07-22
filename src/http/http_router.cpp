@@ -1405,6 +1405,8 @@ HttpRouter::Response HttpRouter::route_application(
         || target.starts_with(
             "/api/v1/cluster/members"
         )
+        || target ==
+            "/api/v1/cluster/rebalance"
         || target.starts_with(
             "/api/v1/cluster/catalog"
         )

@@ -36,6 +36,10 @@ constexpr std::string_view cluster_members_prefix{
     "/api/v1/cluster/members"
 };
 
+constexpr std::string_view cluster_rebalance_route{
+    "/api/v1/cluster/rebalance"
+};
+
 constexpr std::string_view cluster_catalog_route{
     "/api/v1/cluster/catalog"
 };
@@ -747,6 +751,16 @@ HttpRouter::route_cluster_request(
         request_target(
             request
         );
+
+    if (
+        target ==
+        cluster_rebalance_route
+    )
+    {
+        return route_cluster_rebalance_request(
+            request
+        );
+    }
 
     if (
         target.starts_with(
