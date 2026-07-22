@@ -1,6 +1,7 @@
 #include "nexusfs/app/nexusfs_service.hpp"
 
 #include "nexusfs/cluster/peer_transport.hpp"
+#include "nexusfs/cluster/replica_repair.hpp"
 #include "nexusfs/observability/json_logger.hpp"
 #include "nexusfs/observability/metrics_registry.hpp"
 #include "nexusfs/storage/chunk_store.hpp"
@@ -454,6 +455,37 @@ NexusFsService::NexusFsService(
         );
     }
 
+    if (!metrics_registry)
+    {
+        metrics_registry =
+            std::make_shared<
+                observability::MetricsRegistry
+            >();
+    }
+
+    if (!logger)
+    {
+        logger =
+            std::make_shared<
+                observability::JsonLogger
+            >();
+    }
+
+    if (cluster_node)
+    {
+        replica_repair_coordinator_ =
+            std::make_shared<
+                cluster::ReplicaRepairCoordinator
+            >(
+                cluster_node,
+                std::chrono::milliseconds{
+                    3000
+                },
+                metrics_registry,
+                logger
+            );
+    }
+
     if (replication_factor_ > 1)
     {
         replication_coordinator_ =
@@ -494,6 +526,91 @@ NexusFsService::NexusFsService(
 
     (void)chunk_store;
     (void)manifest_store;
+}
+
+void NexusFsService::
+repair_missing_manifest_chunks(
+    const std::string& manifest_id
+) const
+{
+    if (!replica_repair_coordinator_)
+    {
+        return;
+    }
+
+    /*
+     * Recovery publishes local chunks, so it uses the exclusive
+     * storage lock. Normal complete-file restores continue using
+     * the shared lock after this short repair check finishes.
+     */
+    const std::unique_lock storage_lock{
+        concurrency_state_->
+            storage_mutex
+    };
+
+    storage::ChunkStore chunk_store{
+        storage_root_
+    };
+
+    const storage::ManifestStore manifest_store{
+        storage_root_
+    };
+
+    const LoadedManifest loaded_manifest =
+        load_canonical_manifest(
+            manifest_store,
+            manifest_id
+        );
+
+    for (
+        const std::string& chunk_hash :
+        loaded_manifest.manifest
+            .chunk_hashes()
+    )
+    {
+        if (
+            chunk_store.contains(
+                chunk_hash
+            )
+        )
+        {
+            continue;
+        }
+
+        const cluster::ChunkRecoveryReport report =
+            replica_repair_coordinator_->
+                recover_chunk(
+                    chunk_hash,
+                    chunk_store
+                );
+
+        if (!report.recovered)
+        {
+            std::string message =
+                "Missing chunk could not be recovered: "
+                + chunk_hash
+                + ". Attempted "
+                + std::to_string(
+                    report.peer_attempts
+                )
+                + " configured peers.";
+
+            if (!report.failures.empty())
+            {
+                message +=
+                    " First peer failure: "
+                    + report.failures.front()
+                        .peer_node_id
+                    + " - "
+                    + report.failures.front()
+                        .error;
+            }
+
+            throw std::runtime_error(
+                message
+            );
+        }
+    }
 }
 
 StoreFileResult NexusFsService::store_file(
@@ -735,6 +852,13 @@ RestoreFileResult NexusFsService::restore_file(
         *output_mutex
     };
 
+    if (replica_repair_coordinator_)
+    {
+        repair_missing_manifest_chunks(
+            manifest_id
+        );
+    }
+
     const std::shared_lock storage_lock{
         concurrency_state_->
             storage_mutex
@@ -872,6 +996,13 @@ VerifyFileResult NexusFsService::verify_file(
     {
         throw std::invalid_argument(
             "Verify manifest ID cannot be empty."
+        );
+    }
+
+    if (replica_repair_coordinator_)
+    {
+        repair_missing_manifest_chunks(
+            manifest_id
         );
     }
 

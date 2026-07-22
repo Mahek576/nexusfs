@@ -241,6 +241,11 @@ struct MetricsRegistry::State
     Counter replication_remote_acknowledgements{0};
     Counter replication_remote_failures{0};
 
+    Counter remote_chunk_reads_total{0};
+    Counter remote_chunk_reads_succeeded{0};
+    Counter remote_chunk_reads_failed{0};
+    Counter local_chunk_repairs_total{0};
+
     mutable std::mutex dimensions_mutex;
 
     std::unordered_map<
@@ -604,6 +609,37 @@ void MetricsRegistry::record_replication_result(
     }
 }
 
+void MetricsRegistry::record_remote_chunk_read(
+    bool succeeded
+) noexcept
+{
+    increment_counter(
+        state_->remote_chunk_reads_total
+    );
+
+    if (succeeded)
+    {
+        increment_counter(
+            state_->
+                remote_chunk_reads_succeeded
+        );
+    }
+    else
+    {
+        increment_counter(
+            state_->remote_chunk_reads_failed
+        );
+    }
+}
+
+void MetricsRegistry::record_local_chunk_repair()
+    noexcept
+{
+    increment_counter(
+        state_->local_chunk_repairs_total
+    );
+}
+
 MetricsSnapshot MetricsRegistry::snapshot() const
 {
     MetricsSnapshot result;
@@ -832,6 +868,27 @@ MetricsSnapshot MetricsRegistry::snapshot() const
             replication_remote_failures.load(
                 std::memory_order_relaxed
             );
+
+    result.remote_chunk_reads_total =
+        state_->remote_chunk_reads_total.load(
+            std::memory_order_relaxed
+        );
+
+    result.remote_chunk_reads_succeeded =
+        state_->
+            remote_chunk_reads_succeeded.load(
+                std::memory_order_relaxed
+            );
+
+    result.remote_chunk_reads_failed =
+        state_->remote_chunk_reads_failed.load(
+            std::memory_order_relaxed
+        );
+
+    result.local_chunk_repairs_total =
+        state_->local_chunk_repairs_total.load(
+            std::memory_order_relaxed
+        );
 
     {
         const std::lock_guard lock{

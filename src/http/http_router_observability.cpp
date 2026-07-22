@@ -688,6 +688,28 @@ HttpRouter::Response make_metrics_response(
                                 .replication_remote_failures
                         }
                     }
+                },
+                {
+                    "recovery",
+                    {
+                        {
+                            "remote_reads_total",
+                            snapshot.remote_chunk_reads_total
+                        },
+                        {
+                            "remote_reads_succeeded",
+                            snapshot
+                                .remote_chunk_reads_succeeded
+                        },
+                        {
+                            "remote_reads_failed",
+                            snapshot.remote_chunk_reads_failed
+                        },
+                        {
+                            "local_repairs",
+                            snapshot.local_chunk_repairs_total
+                        }
+                    }
                 }
             }
         }

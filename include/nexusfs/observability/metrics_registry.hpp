@@ -83,6 +83,11 @@ struct MetricsSnapshot
     std::uint64_t replication_remote_acknowledgements{0};
     std::uint64_t replication_remote_failures{0};
 
+    std::uint64_t remote_chunk_reads_total{0};
+    std::uint64_t remote_chunk_reads_succeeded{0};
+    std::uint64_t remote_chunk_reads_failed{0};
+    std::uint64_t local_chunk_repairs_total{0};
+
     std::vector<NamedCounter> requests_by_method;
     std::vector<HttpRouteCounter> requests_by_route;
     std::vector<HttpStatusCounter> responses_by_status;
@@ -207,6 +212,18 @@ public:
         std::uint64_t remote_failures,
         bool satisfied
     ) noexcept;
+
+    /*
+     * Records one remote chunk-read attempt.
+     */
+    void record_remote_chunk_read(
+        bool succeeded
+    ) noexcept;
+
+    /*
+     * Records one verified local chunk repair.
+     */
+    void record_local_chunk_repair() noexcept;
 
     /*
      * Produces a self-consistent best-effort metrics snapshot.

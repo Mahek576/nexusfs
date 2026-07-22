@@ -12,6 +12,7 @@ namespace nexusfs::cluster
 {
 
 class ClusterNodeFoundation;
+class ReplicaRepairCoordinator;
 class ReplicationCoordinator;
 
 }
@@ -196,6 +197,14 @@ private:
     std::shared_ptr<
         cluster::ReplicationCoordinator
     > replication_coordinator_;
+
+    std::shared_ptr<
+        cluster::ReplicaRepairCoordinator
+    > replica_repair_coordinator_;
+
+    void repair_missing_manifest_chunks(
+        const std::string& manifest_id
+    ) const;
 
     /*
      * shared_ptr deliberately preserves the original copyability of
