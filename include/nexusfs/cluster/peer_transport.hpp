@@ -10,6 +10,14 @@
 #include <string>
 #include <vector>
 
+namespace nexusfs::observability
+{
+
+class JsonLogger;
+class MetricsRegistry;
+
+}
+
 namespace nexusfs::cluster
 {
 
@@ -110,7 +118,13 @@ public:
         std::chrono::milliseconds timeout =
             std::chrono::milliseconds{
                 3000
-            }
+            },
+        std::shared_ptr<
+            observability::MetricsRegistry
+        > metrics_registry = nullptr,
+        std::shared_ptr<
+            observability::JsonLogger
+        > logger = nullptr
     );
 
     [[nodiscard]] ReplicationReport
@@ -134,6 +148,14 @@ private:
     > cluster_node_;
 
     PeerTransport transport_;
+
+    std::shared_ptr<
+        observability::MetricsRegistry
+    > metrics_registry_;
+
+    std::shared_ptr<
+        observability::JsonLogger
+    > logger_;
 };
 
 }

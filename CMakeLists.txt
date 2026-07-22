@@ -25,6 +25,7 @@ add_library(
         src/cli/command_line.cpp
         src/cluster/cluster_node_foundation.cpp
         src/cluster/peer_transport.cpp
+        src/cluster/heartbeat_scheduler.cpp
         src/daemon/daemon_configuration.cpp
         src/http/http_router.cpp
         src/http/http_router_cluster.cpp
@@ -95,6 +96,47 @@ target_link_libraries(
 )
 
 if(BUILD_TESTING)
+    add_executable(
+        nexusfs_cluster_runtime_tests
+        tests/test_cluster_runtime.cpp
+    )
+
+    target_link_libraries(
+        nexusfs_cluster_runtime_tests
+        PRIVATE
+            nexusfs_core
+            nlohmann_json::nlohmann_json
+            Threads::Threads
+    )
+
+    if(MSVC)
+        target_compile_options(
+            nexusfs_cluster_runtime_tests
+            PRIVATE
+                /W4
+                /permissive-
+        )
+    else()
+        target_compile_options(
+            nexusfs_cluster_runtime_tests
+            PRIVATE
+                -Wall
+                -Wextra
+                -Wpedantic
+        )
+    endif()
+
+    add_test(
+        NAME nexusfs_cluster_runtime_tests
+        COMMAND nexusfs_cluster_runtime_tests
+    )
+
+    set_tests_properties(
+        nexusfs_cluster_runtime_tests
+        PROPERTIES
+            TIMEOUT 30
+    )
+
     add_executable(
         nexusfs_automatic_replication_tests
         tests/test_automatic_replication.cpp

@@ -73,6 +73,16 @@ struct MetricsSnapshot
     std::uint64_t recovery_temporary_files_removed{0};
     std::uint64_t recovery_non_regular_entries_preserved{0};
 
+    std::uint64_t heartbeat_attempts_total{0};
+    std::uint64_t heartbeat_attempts_succeeded{0};
+    std::uint64_t heartbeat_attempts_failed{0};
+
+    std::uint64_t replication_chunks_total{0};
+    std::uint64_t replication_chunks_satisfied{0};
+    std::uint64_t replication_chunks_failed{0};
+    std::uint64_t replication_remote_acknowledgements{0};
+    std::uint64_t replication_remote_failures{0};
+
     std::vector<NamedCounter> requests_by_method;
     std::vector<HttpRouteCounter> requests_by_route;
     std::vector<HttpStatusCounter> responses_by_status;
@@ -180,6 +190,22 @@ public:
         std::uint64_t temporary_entries_found,
         std::uint64_t temporary_files_removed,
         std::uint64_t non_regular_entries_preserved
+    ) noexcept;
+
+    /*
+     * Records one outbound peer-heartbeat attempt.
+     */
+    void record_heartbeat_attempt(
+        bool succeeded
+    ) noexcept;
+
+    /*
+     * Records the result of replicating one chunk.
+     */
+    void record_replication_result(
+        std::uint64_t remote_acknowledgements,
+        std::uint64_t remote_failures,
+        bool satisfied
     ) noexcept;
 
     /*

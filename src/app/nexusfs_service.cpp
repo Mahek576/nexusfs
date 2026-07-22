@@ -1,6 +1,8 @@
 #include "nexusfs/app/nexusfs_service.hpp"
 
 #include "nexusfs/cluster/peer_transport.hpp"
+#include "nexusfs/observability/json_logger.hpp"
+#include "nexusfs/observability/metrics_registry.hpp"
 #include "nexusfs/storage/chunk_store.hpp"
 #include "nexusfs/storage/chunker.hpp"
 #include "nexusfs/storage/file_manifest.hpp"
@@ -11,6 +13,7 @@
 #include "nexusfs/storage/sha256_hasher.hpp"
 
 #include <cctype>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
@@ -384,7 +387,9 @@ NexusFsService::NexusFsService(
           default_chunk_size,
           nullptr,
           1,
-          true
+          true,
+          nullptr,
+          nullptr
       }
 {
 }
@@ -396,7 +401,13 @@ NexusFsService::NexusFsService(
         cluster::ClusterNodeFoundation
     > cluster_node,
     std::size_t replication_factor,
-    bool strict_replication
+    bool strict_replication,
+    std::shared_ptr<
+        observability::MetricsRegistry
+    > metrics_registry,
+    std::shared_ptr<
+        observability::JsonLogger
+    > logger
 )
     : storage_root_{
           std::move(storage_root)
@@ -449,7 +460,12 @@ NexusFsService::NexusFsService(
             std::make_shared<
                 cluster::ReplicationCoordinator
             >(
-                std::move(cluster_node)
+                std::move(cluster_node),
+                std::chrono::milliseconds{
+                    3000
+                },
+                std::move(metrics_registry),
+                std::move(logger)
             );
     }
 

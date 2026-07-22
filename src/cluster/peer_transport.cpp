@@ -1,5 +1,7 @@
 #include "nexusfs/cluster/peer_transport.hpp"
 
+#include "nexusfs/observability/json_logger.hpp"
+#include "nexusfs/observability/metrics_registry.hpp"
 #include "nexusfs/storage/sha256_hasher.hpp"
 
 #include <boost/asio/error.hpp>
@@ -648,7 +650,13 @@ ReplicationCoordinator::ReplicationCoordinator(
     std::shared_ptr<
         ClusterNodeFoundation
     > cluster_node,
-    std::chrono::milliseconds timeout
+    std::chrono::milliseconds timeout,
+    std::shared_ptr<
+        observability::MetricsRegistry
+    > metrics_registry,
+    std::shared_ptr<
+        observability::JsonLogger
+    > logger
 )
     : cluster_node_{
           std::move(cluster_node)
@@ -656,6 +664,12 @@ ReplicationCoordinator::ReplicationCoordinator(
       transport_{
           cluster_node_,
           timeout
+      },
+      metrics_registry_{
+          std::move(metrics_registry)
+      },
+      logger_{
+          std::move(logger)
       }
 {
     if (!cluster_node_)
@@ -664,6 +678,22 @@ ReplicationCoordinator::ReplicationCoordinator(
             "Replication coordinator cluster "
             "node cannot be null."
         );
+    }
+
+    if (!metrics_registry_)
+    {
+        metrics_registry_ =
+            std::make_shared<
+                observability::MetricsRegistry
+            >();
+    }
+
+    if (!logger_)
+    {
+        logger_ =
+            std::make_shared<
+                observability::JsonLogger
+            >();
     }
 }
 
@@ -695,6 +725,41 @@ ReplicationCoordinator::replicate_chunk(
     {
         report.satisfied =
             true;
+
+        metrics_registry_->
+            record_replication_result(
+                0,
+                0,
+                true
+            );
+
+        logger_->log(
+            observability::LogLevel::debug,
+            "chunk_replication_completed",
+            "Chunk replication completed.",
+            {
+                observability::LogField{
+                    "chunk_hash",
+                    chunk_hash
+                },
+                observability::LogField{
+                    "requested_remote_replicas",
+                    static_cast<std::uint64_t>(0)
+                },
+                observability::LogField{
+                    "acknowledged_remote_replicas",
+                    static_cast<std::uint64_t>(0)
+                },
+                observability::LogField{
+                    "remote_failures",
+                    static_cast<std::uint64_t>(0)
+                },
+                observability::LogField{
+                    "satisfied",
+                    true
+                }
+            }
+        );
 
         return report;
     }
@@ -762,6 +827,61 @@ ReplicationCoordinator::replicate_chunk(
     report.satisfied =
         report.acknowledged_replicas
         >= report.requested_remote_replicas;
+
+    metrics_registry_->
+        record_replication_result(
+            static_cast<std::uint64_t>(
+                report.acknowledged_replicas
+            ),
+            static_cast<std::uint64_t>(
+                report.failures.size()
+            ),
+            report.satisfied
+        );
+
+    logger_->log(
+        report.satisfied
+            ? observability::LogLevel::info
+            : observability::LogLevel::warning,
+        "chunk_replication_completed",
+        report.satisfied
+            ? "Chunk replication satisfied its policy."
+            : "Chunk replication did not satisfy its policy.",
+        {
+            observability::LogField{
+                "chunk_hash",
+                chunk_hash
+            },
+            observability::LogField{
+                "requested_remote_replicas",
+                static_cast<std::uint64_t>(
+                    report.requested_remote_replicas
+                )
+            },
+            observability::LogField{
+                "selected_peers",
+                static_cast<std::uint64_t>(
+                    report.selected_peers
+                )
+            },
+            observability::LogField{
+                "acknowledged_remote_replicas",
+                static_cast<std::uint64_t>(
+                    report.acknowledged_replicas
+                )
+            },
+            observability::LogField{
+                "remote_failures",
+                static_cast<std::uint64_t>(
+                    report.failures.size()
+                )
+            },
+            observability::LogField{
+                "satisfied",
+                report.satisfied
+            }
+        }
+    );
 
     return report;
 }

@@ -16,6 +16,14 @@ class ReplicationCoordinator;
 
 }
 
+namespace nexusfs::observability
+{
+
+class JsonLogger;
+class MetricsRegistry;
+
+}
+
 namespace nexusfs::app
 {
 
@@ -125,7 +133,13 @@ public:
             cluster::ClusterNodeFoundation
         > cluster_node,
         std::size_t replication_factor,
-        bool strict_replication
+        bool strict_replication,
+        std::shared_ptr<
+            observability::MetricsRegistry
+        > metrics_registry = nullptr,
+        std::shared_ptr<
+            observability::JsonLogger
+        > logger = nullptr
     );
 
     /*

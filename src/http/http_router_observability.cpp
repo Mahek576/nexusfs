@@ -639,6 +639,57 @@ HttpRouter::Response make_metrics_response(
                         .recovery_non_regular_entries_preserved
                 }
             }
+        },
+        {
+            "cluster_transport",
+            {
+                {
+                    "heartbeats",
+                    {
+                        {
+                            "attempted",
+                            snapshot.heartbeat_attempts_total
+                        },
+                        {
+                            "succeeded",
+                            snapshot
+                                .heartbeat_attempts_succeeded
+                        },
+                        {
+                            "failed",
+                            snapshot.heartbeat_attempts_failed
+                        }
+                    }
+                },
+                {
+                    "replication",
+                    {
+                        {
+                            "chunks_total",
+                            snapshot.replication_chunks_total
+                        },
+                        {
+                            "chunks_satisfied",
+                            snapshot
+                                .replication_chunks_satisfied
+                        },
+                        {
+                            "chunks_failed",
+                            snapshot.replication_chunks_failed
+                        },
+                        {
+                            "remote_acknowledgements",
+                            snapshot
+                                .replication_remote_acknowledgements
+                        },
+                        {
+                            "remote_failures",
+                            snapshot
+                                .replication_remote_failures
+                        }
+                    }
+                }
+            }
         }
     };
 
