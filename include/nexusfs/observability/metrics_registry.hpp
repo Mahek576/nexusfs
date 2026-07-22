@@ -144,6 +144,15 @@ struct MetricsSnapshot
     std::uint64_t rebalancing_peer_failures{0};
     std::uint64_t rebalancing_under_replicated_chunks{0};
 
+    std::uint64_t peer_security_requests_total{0};
+    std::uint64_t peer_security_requests_accepted{0};
+    std::uint64_t peer_security_requests_rejected{0};
+    std::uint64_t peer_security_replays_rejected{0};
+
+    std::uint64_t admin_security_requests_total{0};
+    std::uint64_t admin_security_requests_accepted{0};
+    std::uint64_t admin_security_requests_rejected{0};
+
     std::vector<NamedCounter> requests_by_method;
     std::vector<HttpRouteCounter> requests_by_route;
     std::vector<HttpStatusCounter> responses_by_status;
@@ -366,6 +375,21 @@ public:
      */
     void record_rebalance_idempotency_conflict()
         noexcept;
+
+    /*
+     * Records one signed peer-authentication decision.
+     */
+    void record_peer_security_result(
+        bool accepted,
+        bool replayed
+    ) noexcept;
+
+    /*
+     * Records one administrator-authentication decision.
+     */
+    void record_admin_security_result(
+        bool accepted
+    ) noexcept;
 
     /*
      * Produces a self-consistent best-effort metrics snapshot.

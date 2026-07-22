@@ -22,6 +22,7 @@ add_library(
     nexusfs_core
     STATIC
         src/app/nexusfs_service.cpp
+        src/admin/admin_client.cpp
         src/cli/command_line.cpp
         src/cluster/cluster_node_foundation.cpp
         src/cluster/metadata_ownership.cpp
@@ -40,6 +41,7 @@ add_library(
         src/daemon/daemon_configuration.cpp
         src/http/http_router.cpp
         src/http/http_router_cluster.cpp
+        src/http/http_router_admin.cpp
         src/http/http_router_cluster_membership.cpp
         src/http/http_router_cluster_rebalance.cpp
         src/http/http_router_cluster_manifest.cpp
@@ -50,6 +52,7 @@ add_library(
         src/http/http_session.cpp
         src/observability/json_logger.cpp
         src/observability/metrics_registry.cpp
+        src/security/request_security.cpp
         src/storage/durable_file.cpp
         src/storage/storage_recovery.cpp
         src/storage/chunker.cpp
@@ -110,7 +113,60 @@ target_link_libraries(
         nexusfs_core
 )
 
+add_executable(
+    nexusfsctl
+    src/admin_main.cpp
+)
+
+target_link_libraries(
+    nexusfsctl
+    PRIVATE
+        nexusfs_core
+)
+
+
 if(BUILD_TESTING)
+    add_executable(
+        nexusfs_security_admin_tests
+        tests/test_security_admin.cpp
+    )
+
+    target_link_libraries(
+        nexusfs_security_admin_tests
+        PRIVATE
+            nexusfs_core
+            nlohmann_json::nlohmann_json
+            Threads::Threads
+    )
+
+    if(MSVC)
+        target_compile_options(
+            nexusfs_security_admin_tests
+            PRIVATE
+                /W4
+                /permissive-
+        )
+    else()
+        target_compile_options(
+            nexusfs_security_admin_tests
+            PRIVATE
+                -Wall
+                -Wextra
+                -Wpedantic
+        )
+    endif()
+
+    add_test(
+        NAME nexusfs_security_admin_tests
+        COMMAND nexusfs_security_admin_tests
+    )
+
+    set_tests_properties(
+        nexusfs_security_admin_tests
+        PROPERTIES
+            TIMEOUT 60
+    )
+
     add_executable(
         nexusfs_consistency_rebalancing_tests
         tests/test_consistency_rebalancing.cpp

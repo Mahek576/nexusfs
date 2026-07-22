@@ -302,6 +302,15 @@ struct MetricsRegistry::State
     Counter rebalancing_peer_failures{0};
     Counter rebalancing_under_replicated_chunks{0};
 
+    Counter peer_security_requests_total{0};
+    Counter peer_security_requests_accepted{0};
+    Counter peer_security_requests_rejected{0};
+    Counter peer_security_replays_rejected{0};
+
+    Counter admin_security_requests_total{0};
+    Counter admin_security_requests_accepted{0};
+    Counter admin_security_requests_rejected{0};
+
     mutable std::mutex dimensions_mutex;
 
     std::unordered_map<
@@ -1024,9 +1033,108 @@ record_rebalance_idempotency_conflict()
     );
 }
 
+void MetricsRegistry::record_peer_security_result(
+    bool accepted,
+    bool replayed
+) noexcept
+{
+    increment_counter(
+        state_->peer_security_requests_total
+    );
+
+    if (accepted)
+    {
+        increment_counter(
+            state_->
+                peer_security_requests_accepted
+        );
+    }
+    else
+    {
+        increment_counter(
+            state_->
+                peer_security_requests_rejected
+        );
+    }
+
+    if (replayed)
+    {
+        increment_counter(
+            state_->
+                peer_security_replays_rejected
+        );
+    }
+}
+
+void MetricsRegistry::record_admin_security_result(
+    bool accepted
+) noexcept
+{
+    increment_counter(
+        state_->admin_security_requests_total
+    );
+
+    if (accepted)
+    {
+        increment_counter(
+            state_->
+                admin_security_requests_accepted
+        );
+    }
+    else
+    {
+        increment_counter(
+            state_->
+                admin_security_requests_rejected
+        );
+    }
+}
+
 MetricsSnapshot MetricsRegistry::snapshot() const
 {
     MetricsSnapshot result;
+
+    result.peer_security_requests_total =
+        state_->
+            peer_security_requests_total.load(
+                std::memory_order_relaxed
+            );
+
+    result.peer_security_requests_accepted =
+        state_->
+            peer_security_requests_accepted.load(
+                std::memory_order_relaxed
+            );
+
+    result.peer_security_requests_rejected =
+        state_->
+            peer_security_requests_rejected.load(
+                std::memory_order_relaxed
+            );
+
+    result.peer_security_replays_rejected =
+        state_->
+            peer_security_replays_rejected.load(
+                std::memory_order_relaxed
+            );
+
+    result.admin_security_requests_total =
+        state_->
+            admin_security_requests_total.load(
+                std::memory_order_relaxed
+            );
+
+    result.admin_security_requests_accepted =
+        state_->
+            admin_security_requests_accepted.load(
+                std::memory_order_relaxed
+            );
+
+    result.admin_security_requests_rejected =
+        state_->
+            admin_security_requests_rejected.load(
+                std::memory_order_relaxed
+            );
 
     const State::Clock::time_point now =
         State::Clock::now();

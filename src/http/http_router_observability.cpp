@@ -29,6 +29,30 @@ constexpr std::string_view metrics_route{
     "/api/v1/metrics"
 };
 
+constexpr std::string_view admin_overview_route{
+    "/api/v1/admin/overview"
+};
+
+constexpr std::string_view admin_files_route{
+    "/api/v1/admin/files"
+};
+
+constexpr std::string_view admin_sync_route{
+    "/api/v1/admin/operations/catalog-sync"
+};
+
+constexpr std::string_view admin_repair_route{
+    "/api/v1/admin/operations/repair"
+};
+
+constexpr std::string_view admin_maintenance_route{
+    "/api/v1/admin/operations/maintenance"
+};
+
+constexpr std::string_view admin_rebalance_route{
+    "/api/v1/admin/operations/rebalance"
+};
+
 constexpr std::string_view cluster_route{
     "/api/v1/cluster"
 };
@@ -546,6 +570,56 @@ HttpRouter::Response make_metrics_response(
                     make_status_counters(
                         snapshot
                     )
+                }
+            }
+        },
+        {
+            "security",
+            {
+                {
+                    "peer_requests",
+                    {
+                        {
+                            "total",
+                            snapshot
+                                .peer_security_requests_total
+                        },
+                        {
+                            "accepted",
+                            snapshot
+                                .peer_security_requests_accepted
+                        },
+                        {
+                            "rejected",
+                            snapshot
+                                .peer_security_requests_rejected
+                        },
+                        {
+                            "replays_rejected",
+                            snapshot
+                                .peer_security_replays_rejected
+                        }
+                    }
+                },
+                {
+                    "admin_requests",
+                    {
+                        {
+                            "total",
+                            snapshot
+                                .admin_security_requests_total
+                        },
+                        {
+                            "accepted",
+                            snapshot
+                                .admin_security_requests_accepted
+                        },
+                        {
+                            "rejected",
+                            snapshot
+                                .admin_security_requests_rejected
+                        }
+                    }
                 }
             }
         },
@@ -1266,6 +1340,36 @@ std::string_view HttpRouter::normalized_route(
     if (target == metrics_route)
     {
         return metrics_route;
+    }
+
+    if (target == admin_overview_route)
+    {
+        return admin_overview_route;
+    }
+
+    if (target == admin_files_route)
+    {
+        return admin_files_route;
+    }
+
+    if (target == admin_sync_route)
+    {
+        return admin_sync_route;
+    }
+
+    if (target == admin_repair_route)
+    {
+        return admin_repair_route;
+    }
+
+    if (target == admin_maintenance_route)
+    {
+        return admin_maintenance_route;
+    }
+
+    if (target == admin_rebalance_route)
+    {
+        return admin_rebalance_route;
     }
 
     if (target == cluster_route)

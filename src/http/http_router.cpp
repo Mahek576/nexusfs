@@ -1399,6 +1399,17 @@ HttpRouter::Response HttpRouter::route_application(
         request_target(request);
 
     if (
+        target.starts_with(
+            "/api/v1/admin/"
+        )
+    )
+    {
+        return route_admin_request(
+            request
+        );
+    }
+
+    if (
         target == "/api/v1/cluster"
         || target ==
             "/api/v1/cluster/heartbeat"
@@ -1418,6 +1429,73 @@ HttpRouter::Response HttpRouter::route_application(
         )
     )
     {
+        if (
+            cluster_node_
+            && request_security_->
+                peer_signing_enabled()
+        )
+        {
+            const bool allow_unknown_join =
+                target ==
+                "/api/v1/cluster/members/join";
+
+            const security::AuthenticationResult
+                authentication =
+                    request_security_->
+                        verify_peer_request(
+                            request,
+                            *cluster_node_,
+                            allow_unknown_join
+                        );
+
+            metrics_registry_->
+                record_peer_security_result(
+                    authentication.accepted,
+                    authentication.replayed
+                );
+
+            if (!authentication.accepted)
+            {
+                logger_->log(
+                    observability::LogLevel::warning,
+                    "peer_request_rejected",
+                    "A signed cluster request was rejected.",
+                    {
+                        observability::LogField{
+                            "status",
+                            std::string{
+                                security::
+                                    authentication_status_name(
+                                        authentication.status
+                                    )
+                            }
+                        },
+                        observability::LogField{
+                            "route",
+                            std::string{
+                                target
+                            }
+                        },
+                        observability::LogField{
+                            "replayed",
+                            authentication.replayed
+                        }
+                    }
+                );
+
+                return make_error_response(
+                    request,
+                    authentication.replayed
+                        ? beast_http::status::conflict
+                        : beast_http::status::unauthorized,
+                    authentication.replayed
+                        ? "peer_request_replayed"
+                        : "peer_request_not_authenticated",
+                    authentication.reason
+                );
+            }
+        }
+
         return route_cluster_request(
             request
         );
