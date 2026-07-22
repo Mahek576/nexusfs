@@ -1,284 +1,172 @@
 # NexusFS
 
 [![NexusFS CI](https://github.com/Mahek576/nexusfs/actions/workflows/ci.yml/badge.svg)](https://github.com/Mahek576/nexusfs/actions/workflows/ci.yml)
+[![Dashboard CI](https://github.com/Mahek576/nexusfs/actions/workflows/dashboard-ci.yml/badge.svg)](https://github.com/Mahek576/nexusfs/actions/workflows/dashboard-ci.yml)
 
-NexusFS is a C++20 content-addressed storage engine built from first principles as the foundation for a future distributed file-storage system.
+NexusFS is a C++20 distributed content-addressed storage system built from first principles. It combines deterministic chunk storage, crash-safe persistence, authenticated peer communication, replication and repair, distributed metadata coordination, dynamic membership, epoch-fenced rebalancing, observability, an administrator CLI, and a production-built Next.js operations dashboard.
 
-The current local V1 can split files into binary chunks, identify each chunk using SHA-256, deduplicate repeated content, persist chunks and manifests, reconstruct files without the original source, detect missing or corrupted data, and expose these workflows through both a command-line interface and a reusable application service.
+The project is designed as a serious systems-engineering portfolio project rather than a thin CRUD application. Its core workflows exercise operating-system concepts, networking, concurrency, file-system design, distributed systems, security, testing, and production-style operational tooling.
 
-> NexusFS local V1 is complete as a single-node storage foundation. Networking, replication, distributed metadata, APIs, and the final dashboard are planned future layers.
+> **Project status:** feature-complete portfolio release candidate. NexusFS is suitable for local demonstrations and engineering evaluation, but it is not presented as a production replacement for a mature distributed file system.
 
 ---
 
-## Features
+## Product Demo
 
-- Binary-safe fixed-size file chunking
-- SHA-256 content identity
-- Content-addressed chunk storage
-- Automatic chunk deduplication
-- Persistent canonical binary manifests
+![NexusFS dashboard overview](docs/images/dashboard-overview.png)
+
+The dashboard is connected to the real C++ daemon through authenticated server-side requests. It exposes storage health, file manifests, cluster state, security posture, maintenance controls, and rebalancing operations without sending the administrator token to the browser.
+
+Additional screenshots:
+
+- [Stored-file catalog and cluster topology](docs/images/dashboard-catalog.png)
+- [Administrator operations and security posture](docs/images/dashboard-operations-security.png)
+
+---
+
+## What NexusFS Implements
+
+### Content-addressed storage
+
+- Binary-safe fixed-size chunking
+- SHA-256 chunk identities
+- Automatic deduplication
+- Canonical binary manifests
 - Content-addressed manifest identities
-- Temporary-write-and-rename finalization
-- Read-back integrity verification
-- Byte-perfect file reconstruction
-- Missing-chunk detection
-- Corrupted-chunk detection
-- Persistent manifest catalog
-- Reusable application service layer
-- Automated storage, CLI, and service tests
-- Cross-platform CI on Windows and Ubuntu
+- Deterministic sharded storage paths
+- Byte-perfect reconstruction
+- Missing and corrupted chunk detection
+- Deep integrity verification
+
+### Durability and recovery
+
+- Temporary-file write protocol
+- Atomic finalization
+- Read-back verification
+- Crash-safe durable file helpers
+- Startup recovery of interrupted writes
+- Cleanup of stale temporary artifacts
+- Recovery-aware chunk and manifest stores
+
+### Distributed storage
+
+- Persistent cluster identity and membership state
+- Authenticated peer HTTP transport
+- Chunk replication
+- Strict replication mode
+- Automatic replication after file storage
+- Heartbeat scheduling and peer health tracking
+- Peer-backed missing-chunk recovery
+- Proactive replica maintenance
+- Background repair scheduling
+- Deterministic metadata ownership
+- Manifest publication and recovery
+- Distributed metadata catalog exchange
+- Metadata catalog synchronization
+- Dynamic cluster membership
+- Epoch-fenced, idempotent placement rebalancing
+- Durable operation journal
+
+### Security and administration
+
+- HMAC-signed peer requests
+- Timestamp validation
+- Nonce and replay protection
+- Constant-time administrator token checks
+- Authenticated administrator API
+- `nexusfsctl` operations CLI
+- Security metrics and audit-oriented structured logs
+
+### Operations and observability
+
+- Boost.Beast HTTP server
+- Health and metrics endpoints
+- JSON structured logging
+- Runtime request, security, cluster, repair, and rebalancing metrics
+- Dashboard-ready administrator overview
+- Next.js 16 operations dashboard
+- One-command local product startup
+- Separate C++ and dashboard CI workflows
 
 ---
 
 ## Architecture
 
 ```mermaid
-flowchart LR
-    CLI[CLI] --> Parser[CommandLineParser]
-    Parser --> Service[NexusFsService]
+flowchart TB
+    Browser[Browser] -->|same-origin| Dashboard[Next.js Dashboard]
+    Dashboard -->|server-side bearer token| AdminAPI[Administrator API]
 
-    API[Future REST API] -.-> Service
-    Dashboard[Final Dashboard] -.-> API
+    CLI[nexusfs CLI] --> Service[NexusFsService]
+    AdminCLI[nexusfsctl] --> AdminAPI
+    AdminAPI --> Service
 
     Service --> Chunker
     Service --> ChunkStore
     Service --> ManifestStore
-    Service --> ManifestCodec
-    Service --> Reconstructor
-    Service --> Verifier
+    Service --> MetadataCoordinator
+    Service --> ReplicaRepair
+    Service --> ReplicaMaintenance
+    Service --> PlacementRebalancer
 
-    Chunker --> SHA256[SHA-256]
-    ChunkStore --> Disk[(Persistent Storage)]
-    ManifestStore --> Disk
+    Chunker --> SHA[SHA-256]
+    ChunkStore --> DurableStorage[(Crash-safe local storage)]
+    ManifestStore --> DurableStorage
+    MetadataCoordinator --> MetadataCatalog[(Distributed metadata catalog)]
+    PlacementRebalancer --> Journal[(Durable operation journal)]
+
+    PeerTransport[Authenticated peer transport] --> RemoteNodes[Remote NexusFS nodes]
+    MetadataCoordinator --> PeerTransport
+    ReplicaRepair --> PeerTransport
+    ReplicaMaintenance --> PeerTransport
+    PlacementRebalancer --> PeerTransport
+
+    Metrics[Metrics registry] --> AdminAPI
+    Logger[Structured JSON logger] --> AdminAPI
 ```
 
-The command-line interface is intentionally thin. It parses commands, calls `NexusFsService`, and formats the returned result.
+The system is split into three main planes:
 
-Core storage workflows are independent of terminal output, allowing the same service layer to support a future REST API and dashboard backend.
+1. **Data plane** — chunk storage, manifests, reconstruction, verification, replication, and repair.
+2. **Control plane** — membership, metadata ownership, catalog synchronization, maintenance, and rebalancing.
+3. **Operations plane** — administrator API, `nexusfsctl`, metrics, structured logs, security, and dashboard.
+
+A deeper design walkthrough is available in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ---
 
-## Storage Pipeline
+## One-Command Local Startup
 
-### Store
+### Prerequisites
 
-```text
-Source file
-    ↓
-Binary chunking
-    ↓
-SHA-256 per chunk
-    ↓
-Content-addressed chunk paths
-    ↓
-Chunk deduplication
-    ↓
-Canonical file manifest
-    ↓
-SHA-256 manifest ID
-    ↓
-Persistent manifest storage
-```
-
-### Restore
-
-```text
-Manifest ID
-    ↓
-Load and verify manifest
-    ↓
-Decode ordered chunk references
-    ↓
-Load and verify each chunk
-    ↓
-Write temporary reconstructed file
-    ↓
-Validate byte and chunk counts
-    ↓
-Rename to final output
-```
-
-The original source file is not required during restoration.
-
----
-
-## Content-Addressed Storage Layout
-
-NexusFS stores runtime data under `nexusfs_data/`:
-
-```text
-nexusfs_data/
-├── chunks/
-│   ├── 58/
-│   │   └── f1e32d...
-│   └── 0e/
-│       └── 28d1db...
-└── manifests/
-    ├── e5/
-    │   └── 5fa96f...
-    └── 55/
-        └── e7f73b...
-```
-
-For a 64-character SHA-256 identifier:
-
-```text
-58f1e32d9b47...
-```
-
-NexusFS uses:
-
-```text
-Shard directory: first 2 characters
-Filename:        remaining 62 characters
-```
-
-Result:
-
-```text
-chunks/58/f1e32d9b47...
-```
-
-The same sharding strategy is used for manifests.
-
----
-
-## Manifest Format
-
-A file manifest stores the metadata required to reconstruct a file:
-
-- Format version
-- Original filename
-- Original file size
-- Configured chunk size
-- Ordered chunk hashes
-
-All integer fields are encoded in big-endian byte order.
-
-```text
-+--------------------------+------------------+
-| Field                    | Encoded size     |
-+--------------------------+------------------+
-| Magic: "NEXUSFSM"        | 8 bytes          |
-| Format version           | 4 bytes          |
-| Original file size       | 8 bytes          |
-| Configured chunk size    | 8 bytes          |
-| Filename length          | 8 bytes          |
-| Filename                 | Variable         |
-| Chunk count              | 8 bytes          |
-| Ordered SHA-256 hashes   | 64 bytes each    |
-+--------------------------+------------------+
-```
-
-The manifest ID is:
-
-```text
-SHA-256(canonical encoded manifest)
-```
-
-Identical file metadata and ordered chunk references therefore produce the same manifest ID.
-
----
-
-## CLI Commands
-
-The executable currently supports five commands.
-
-### Store a file
-
-```powershell
-.\build\Debug\nexusfs.exe store .\sample.txt
-```
-
-Example result:
-
-```text
-Command: store
-Original filename: sample.txt
-Original file size: 7592 bytes
-Total chunks: 8
-New chunks stored: 8
-Manifest ID: <64-character SHA-256 ID>
-File stored successfully.
-```
-
-Running the same command again reuses existing chunks and the existing manifest.
-
----
-
-### Restore a file
-
-```powershell
-.\build\Debug\nexusfs.exe restore <manifest-id> .\output\sample.txt
-```
-
-NexusFS refuses to overwrite an existing output path.
-
----
-
-### Inspect a manifest
-
-```powershell
-.\build\Debug\nexusfs.exe inspect <manifest-id>
-```
-
-`inspect` displays:
-
-- Original filename
-- File size
-- Chunk size
-- Ordered chunk references
-- Present and missing chunks
-- Overall storage completeness
-
-Inspection checks whether referenced chunk files are present. It does not hash every chunk.
-
----
-
-### Verify stored content
-
-```powershell
-.\build\Debug\nexusfs.exe verify <manifest-id>
-```
-
-`verify` performs deep integrity checking:
-
-- Loads the manifest
-- Validates the manifest SHA-256 identity
-- Confirms canonical encoding
-- Loads every referenced chunk
-- Recalculates each chunk SHA-256
-- Checks positional chunk sizes
-- Confirms the total file size
-
----
-
-### List stored files
-
-```powershell
-.\build\Debug\nexusfs.exe list
-```
-
-The catalog is derived directly from canonical files in the manifest store, avoiding a separate mutable database index.
-
----
-
-## Build Requirements
-
+- Windows PowerShell
 - CMake 3.20 or newer
 - A C++20 compiler
 - vcpkg
-- OpenSSL, installed automatically through the vcpkg manifest
-- Git
+- Node.js 24 and npm
+- A successful Debug build of NexusFS
 
-The repository contains:
+From the repository root:
 
-```text
-vcpkg.json
-vcpkg-configuration.json
+```powershell
+.\scripts\start-local.ps1
 ```
 
-CMake uses vcpkg manifest mode to install the required dependencies.
+The launcher:
+
+- validates ports `8080` and `3000`
+- creates `dashboard/.env.local` with a cryptographically random local administrator token when needed
+- opens a NexusFS daemon window
+- opens a Next.js dashboard window
+- uses the same administrator token for both processes
+
+Open:
+
+```text
+http://127.0.0.1:3000
+```
+
+See [docs/LOCAL_DEVELOPMENT.md](docs/LOCAL_DEVELOPMENT.md) for individual launchers and troubleshooting.
 
 ---
 
@@ -301,23 +189,36 @@ Build:
 cmake --build build --config Debug --parallel
 ```
 
-Run all tests:
+Run the complete C++ regression suite:
 
 ```powershell
-ctest --test-dir build -C Debug --output-on-failure
+ctest `
+    --test-dir build `
+    -C Debug `
+    --output-on-failure
 ```
 
-Run NexusFS:
+Validate the dashboard:
 
 ```powershell
-.\build\Debug\nexusfs.exe list
+Push-Location .\dashboard
+
+try
+{
+    npm ci
+    npm run lint
+    npm run typecheck
+    npm run build
+}
+finally
+{
+    Pop-Location
+}
 ```
 
 ---
 
 ## Build on Linux
-
-The following commands assume `VCPKG_ROOT` points to a valid vcpkg installation.
 
 ```bash
 cmake \
@@ -326,116 +227,239 @@ cmake \
   -DCMAKE_BUILD_TYPE=Debug \
   -DBUILD_TESTING=ON \
   -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
-```
 
-Build:
-
-```bash
 cmake --build build --parallel
-```
-
-Run all tests:
-
-```bash
 ctest --test-dir build --output-on-failure
 ```
 
-Run NexusFS:
+The dashboard can be validated with:
 
 ```bash
-./build/nexusfs list
+cd dashboard
+npm ci
+npm run lint
+npm run typecheck
+npm run build
+```
+
+The supplied one-command product launcher is currently PowerShell-focused.
+
+---
+
+## Executables
+
+### `nexusfs`
+
+The storage CLI supports the local content-addressed data path:
+
+```powershell
+.\build\Debug\nexusfs.exe store .\sample.txt
+.\build\Debug\nexusfs.exe list
+.\build\Debug\nexusfs.exe inspect <manifest-id>
+.\build\Debug\nexusfs.exe verify <manifest-id>
+.\build\Debug\nexusfs.exe restore <manifest-id> .\reconstructed\sample.txt
+```
+
+### `nexusfsd`
+
+Runs the storage daemon, HTTP server, background heartbeat scheduler, replica maintenance scheduler, administrator API, metrics, and structured logging.
+
+```powershell
+.\build\Debug\nexusfsd.exe `
+    --address 127.0.0.1 `
+    --port 8080 `
+    --storage-root .\nexusfs_data `
+    --chunk-size 1024
+```
+
+### `nexusfsctl`
+
+The authenticated administrator CLI supports:
+
+```powershell
+.\build\Debug\nexusfsctl.exe status
+.\build\Debug\nexusfsctl.exe files
+.\build\Debug\nexusfsctl.exe sync
+.\build\Debug\nexusfsctl.exe repair
+.\build\Debug\nexusfsctl.exe maintenance
+.\build\Debug\nexusfsctl.exe rebalance <operation-id> <membership-epoch>
+```
+
+Provide the administrator token through `NEXUSFS_ADMIN_TOKEN` or `--token`.
+
+---
+
+## Storage Pipeline
+
+### Store
+
+```text
+Source file
+    ↓
+Binary chunking
+    ↓
+SHA-256 per chunk
+    ↓
+Content-addressed chunk paths
+    ↓
+Deduplication
+    ↓
+Canonical manifest
+    ↓
+Durable local commit
+    ↓
+Metadata publication
+    ↓
+Strict or best-effort replica placement
+```
+
+### Restore
+
+```text
+Manifest ID
+    ↓
+Load and verify canonical manifest
+    ↓
+Resolve ordered chunk references
+    ↓
+Load and hash each local chunk
+    ↓
+Attempt peer-backed recovery when required
+    ↓
+Write temporary reconstructed file
+    ↓
+Validate byte and chunk counts
+    ↓
+Atomically publish final output
 ```
 
 ---
 
-## Automated Tests
+## On-Disk Layout
 
-NexusFS currently has three CTest executables.
-
-### `nexusfs_tests`
-
-Covers:
-
-- SHA-256 known-answer vectors
-- Manifest encoding and decoding
-- Deterministic manifest identities
-- Malformed manifest rejection
-- Empty files
-- Files smaller than one chunk
-- Exact chunk-boundary files
-- Multi-chunk binary files
-- Intra-file deduplication
-- Persistent chunk and manifest read-back
-- Byte-perfect reconstruction
-- Corrupted-chunk detection
-
-### `nexusfs_cli_tests`
-
-Covers:
-
-- Valid parsing for all five commands
-- Missing command rejection
-- Unknown command rejection
-- Invalid manifest-ID rejection
-- Uppercase manifest-ID rejection
-- Incorrect argument-count rejection
-
-### `nexusfs_service_tests`
-
-Covers the reusable application boundary:
-
-- Service constructor validation
-- File storage
-- Chunk and manifest deduplication
-- Inspection
-- Verification
-- Catalog listing
-- Restoration without the source file
-- Byte-perfect recovery
-- Output overwrite protection
-
-Run all suites:
-
-```powershell
-ctest --test-dir build -C Debug --output-on-failure
+```text
+nexusfs_data/
+├── chunks/
+│   └── <first-two-hash-characters>/
+│       └── <remaining-hash-characters>
+├── manifests/
+│   └── <first-two-hash-characters>/
+│       └── <remaining-hash-characters>
+└── cluster/
+    ├── membership and node state
+    ├── metadata state
+    └── operation journal
 ```
+
+Runtime data is intentionally excluded from Git.
+
+---
+
+## Consistency and Recovery Model
+
+NexusFS uses deterministic identities and durable local state to make operations repeatable:
+
+- chunks and manifests are immutable by content identity
+- repeated stores reuse existing chunks
+- manifest encoding is canonical
+- repair operations verify content before accepting recovered chunks
+- membership epochs fence stale topology changes
+- rebalancing operations use durable operation IDs for idempotency
+- startup recovery scans and repairs interrupted local persistence workflows
+- background maintenance detects under-replicated content and attempts repair
+
+NexusFS currently implements deterministic coordination around an explicit membership view. It does **not** claim to implement a general distributed consensus protocol.
+
+---
+
+## Security Model
+
+Peer requests are protected through signed request metadata, timestamps, nonces, and replay rejection. Administrator endpoints require a bearer token checked using constant-time comparison.
+
+The dashboard uses Next.js server components and server actions:
+
+```text
+Browser
+    ↓ same-origin request
+Next.js server
+    ↓ Authorization: Bearer <server-side token>
+NexusFS administrator API
+```
+
+The browser does not receive `NEXUSFS_ADMIN_TOKEN`.
+
+### Deployment boundary
+
+TLS is intentionally deferred in the current release. Run the administrator API on loopback for local demonstrations, or place it behind a trusted TLS-terminating reverse proxy before exposing it beyond a controlled environment.
+
+---
+
+## Dashboard
+
+The operations dashboard displays:
+
+- daemon connection and uptime
+- storage manifests and logical bytes
+- missing chunks and completeness
+- HTTP success rate
+- standalone or distributed cluster state
+- membership epoch and replication policy
+- peer health and failures
+- stored-file catalog
+- administrator sync, repair, maintenance, and rebalance controls
+- peer request signing
+- administrator authentication
+- replay and rejection counters
+
+Peer-dependent controls are disabled automatically in standalone mode. Local repair and maintenance remain available.
+
+---
+
+## Testing
+
+The CTest suite covers the complete system across focused executables, including:
+
+- hashing, manifests, chunking, deduplication, reconstruction, and verification
+- storage service behavior and concurrency
+- CLI parsing and daemon configuration
+- HTTP routing, uploads, lifecycle, metrics, and structured logging
+- crash-safe durable files and startup recovery
+- cluster-node persistence
+- authenticated peer transport
+- automatic strict replication
+- heartbeats and cluster observability
+- peer-backed repair and proactive maintenance
+- background maintenance scheduling
+- metadata ownership, transport, publication, recovery, catalog exchange, and synchronization
+- dynamic membership
+- consistency and rebalancing
+- security and administrator control-plane workflows
+
+Focused stress validations repeatedly execute distributed and recovery suites before each feature milestone is committed.
 
 ---
 
 ## Continuous Integration
 
-GitHub Actions runs NexusFS on every push and pull request targeting `main`.
+### C++ workflow
 
-The CI matrix includes:
+`.github/workflows/ci.yml` validates the C++ system on Windows and Ubuntu using CMake, vcpkg, and CTest.
 
-```text
-Ubuntu + GCC
-Windows + MSVC
-```
+### Dashboard workflow
 
-Each environment performs:
+`.github/workflows/dashboard-ci.yml` validates:
 
 ```text
-Clean checkout
+npm ci
     ↓
-vcpkg setup
+ESLint
     ↓
-CMake configuration
+TypeScript type checking
     ↓
-Core and executable build
-    ↓
-Storage tests
-    ↓
-CLI tests
-    ↓
-Service tests
+Next.js production build
 ```
 
-Workflow definition:
-
-```text
-.github/workflows/ci.yml
-```
+Both workflows run for relevant pull requests targeting `main`.
 
 ---
 
@@ -443,45 +467,41 @@ Workflow definition:
 
 ```text
 nexusfs/
-├── .github/
-│   └── workflows/
-│       └── ci.yml
-├── include/
-│   └── nexusfs/
-│       ├── app/
-│       │   └── nexusfs_service.hpp
-│       ├── cli/
-│       │   └── command_line.hpp
-│       └── storage/
-│           ├── chunker.hpp
-│           ├── chunk_store.hpp
-│           ├── file_manifest.hpp
-│           ├── file_manifest_codec.hpp
-│           ├── file_reconstructor.hpp
-│           ├── file_verifier.hpp
-│           ├── manifest_store.hpp
-│           └── sha256_hasher.hpp
-├── src/
+├── .github/workflows/
+│   ├── ci.yml
+│   └── dashboard-ci.yml
+├── dashboard/                 # Next.js administrator control plane
+├── docs/
+│   ├── ARCHITECTURE.md
+│   ├── LOCAL_DEVELOPMENT.md
+│   ├── PROJECT_STATUS.md
+│   └── images/
+├── include/nexusfs/
+│   ├── admin/
 │   ├── app/
-│   │   └── nexusfs_service.cpp
 │   ├── cli/
-│   │   └── command_line.cpp
-│   ├── storage/
-│   │   ├── chunker.cpp
-│   │   ├── chunk_store.cpp
-│   │   ├── file_manifest.cpp
-│   │   ├── file_manifest_codec.cpp
-│   │   ├── file_reconstructor.cpp
-│   │   ├── file_verifier.cpp
-│   │   ├── manifest_store.cpp
-│   │   └── sha256_hasher.cpp
-│   └── main.cpp
+│   ├── cluster/
+│   ├── daemon/
+│   ├── http/
+│   ├── observability/
+│   ├── security/
+│   └── storage/
+├── scripts/
+│   ├── run-daemon.ps1
+│   ├── run-dashboard.ps1
+│   └── start-local.ps1
+├── src/
+│   ├── admin/
+│   ├── app/
+│   ├── cli/
+│   ├── cluster/
+│   ├── daemon/
+│   ├── http/
+│   ├── observability/
+│   ├── security/
+│   └── storage/
 ├── tests/
-│   ├── test_cli.cpp
-│   ├── test_main.cpp
-│   └── test_service.cpp
 ├── CMakeLists.txt
-├── sample.txt
 ├── vcpkg-configuration.json
 └── vcpkg.json
 ```
@@ -490,130 +510,99 @@ nexusfs/
 
 ## Design Guarantees
 
-The current local engine provides:
+The current implementation is designed to provide:
 
-- Deterministic chunk identities
-- Deterministic manifest identities
-- Ordered reconstruction
-- Binary-safe operation
-- Deduplication across identical chunks
-- Integrity verification during reads
-- Temporary output cleanup after reconstruction failure
-- Protection against accidental output overwrite
-- Deterministic manifest enumeration
-- Cross-platform automated validation
+- deterministic chunk and manifest identities
+- binary-safe storage and reconstruction
+- deduplication across repeated content
+- integrity verification before accepting data
+- durable local state transitions
+- recovery after interrupted persistence workflows
+- authenticated peer and administrator requests
+- replay-resistant peer communication
+- repeatable metadata ownership
+- epoch fencing for stale membership views
+- idempotent rebalancing operations
+- automatic replica repair attempts
+- observable operational state
+- cross-platform automated validation
 
 ---
 
 ## Current Limitations
 
-The current version is intentionally a local single-node foundation.
+NexusFS is a portfolio-scale distributed systems implementation. The current release does not yet provide:
 
-It does not yet provide:
+- TLS termination inside `nexusfsd`
+- a consensus protocol such as Raft
+- quorum-based read/write semantics
+- multi-datacenter replication
+- erasure coding
+- garbage collection and reference reclamation
+- storage quotas
+- at-rest encryption
+- role-based administrator authorization
+- rolling-upgrade compatibility guarantees
+- production-scale performance validation
 
-- Networked storage nodes
-- Replication
-- Quorum reads or writes
-- Distributed metadata consensus
-- Garbage collection
-- Reference counting
-- Concurrent writer coordination
-- File locking
-- Compression
-- Encryption
-- Authentication or authorization
-- Durable `fsync` guarantees against sudden power loss
-- REST or gRPC APIs
-- A graphical dashboard
-
-SHA-256 provides content identity and corruption detection. It does not provide encryption or access control.
+These limitations are explicit so that the project does not overstate its production readiness.
 
 ---
 
 ## Roadmap
 
-### Phase 1 — Local Content-Addressed Engine
+### Completed
 
-- [x] Binary chunking
-- [x] SHA-256 content identity
-- [x] Persistent chunk store
-- [x] Deduplication
-- [x] Canonical binary manifests
-- [x] Persistent manifest store
-- [x] File reconstruction
-- [x] Inspection and deep verification
-- [x] Manifest catalog
-- [x] Reusable service layer
-- [x] Automated tests
-- [x] Windows and Linux CI
+- [x] Local content-addressed engine
+- [x] Crash-safe durability and startup recovery
+- [x] HTTP daemon and application API
+- [x] Structured logging and metrics
+- [x] Persistent cluster-node foundation
+- [x] Authenticated peer transport
+- [x] Chunk replication and automatic strict replication
+- [x] Heartbeats and failure observation
+- [x] Peer-backed replica repair
+- [x] Proactive and scheduled replica maintenance
+- [x] Deterministic distributed metadata ownership
+- [x] Manifest and metadata catalog exchange
+- [x] Metadata publication, recovery, and synchronization
+- [x] Dynamic cluster membership
+- [x] Epoch-fenced idempotent rebalancing
+- [x] Signed peer security and administrator control plane
+- [x] Next.js operations dashboard
+- [x] One-command local product startup
+- [x] C++ and dashboard CI
 
-### Phase 2 — Local Service and API
+### Optional future extensions
 
-- [ ] Storage daemon
-- [ ] REST or gRPC interface
-- [ ] Structured JSON responses
-- [ ] Configurable storage root and chunk size
-- [ ] Health and metrics endpoints
-- [ ] API integration tests
-
-### Phase 3 — Distributed Storage
-
-- [ ] Peer discovery
-- [ ] Chunk transfer protocol
-- [ ] Replication policies
-- [ ] Node membership
-- [ ] Failure detection
-- [ ] Distributed metadata
-- [ ] Consistency and quorum rules
-- [ ] Repair and rebalancing
-- [ ] Concurrent access control
-
-### Phase 4 — Reliability and Operations
-
-- [ ] Garbage collection
-- [ ] Reference tracking
-- [ ] Storage quotas
-- [ ] Structured logging
-- [ ] Metrics and tracing
-- [ ] Authentication
-- [ ] Authorization
-- [ ] Benchmarking and load testing
-- [ ] Crash-recovery testing
-
-### Phase 5 — NexusFS Dashboard
-
-The dashboard is planned as the final product-facing layer after the API and distributed backend are stable.
-
-Planned dashboard capabilities include:
-
-- Node health and availability
-- Stored-file catalog
-- Manifest and chunk inspection
-- Storage usage
-- Deduplication statistics
-- Replication state
-- Missing and corrupted chunk alerts
-- Restore operations
-- Verification controls
-- Cluster topology
-- Performance and reliability metrics
+- [ ] TLS or mTLS
+- [ ] Raft-backed membership and metadata consensus
+- [ ] Quorum reads and writes
+- [ ] Garbage collection and reference accounting
+- [ ] Storage quotas and admission control
+- [ ] At-rest encryption
+- [ ] Containerized multi-node demonstration
+- [ ] Load, soak, and fault-injection benchmarks
 
 ---
 
 ## Project Status
 
 ```text
-Local content-addressed storage engine: complete
-CLI workflows:                         complete
-Automated regression testing:          complete
-Cross-platform CI:                     complete
-Reusable application service:          complete
+Content-addressed storage:           complete
+Crash-safe local durability:         complete
+HTTP daemon and REST control plane:  complete
+Peer transport and replication:      complete
+Replica repair and maintenance:      complete
+Distributed metadata coordination:   complete
+Dynamic membership:                  complete
+Consistency-aware rebalancing:       complete
+Security and administrator tooling:  complete
+Operations dashboard:                complete
+Local product packaging:             complete
+Automated validation:                complete
 
-REST/API layer:                        planned
-Distributed node layer:                planned
-Replication and coordination:          planned
-Operational tooling:                   planned
-Final dashboard:                       planned
+Production hardening:                intentionally out of scope
 ```
 
-NexusFS is currently a tested, reusable single-node storage foundation—not yet a complete distributed file system.
+NexusFS is now a complete, demonstrable systems-engineering product with an explicit boundary between implemented guarantees and future production-hardening work.
