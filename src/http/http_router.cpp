@@ -1398,6 +1398,17 @@ HttpRouter::Response HttpRouter::route_application(
     const std::string_view target =
         request_target(request);
 
+    if (
+        target == "/api/v1/cluster"
+        || target ==
+            "/api/v1/cluster/heartbeat"
+    )
+    {
+        return route_cluster_request(
+            request
+        );
+    }
+
     if (target == health_route)
     {
         if (

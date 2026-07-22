@@ -2,6 +2,7 @@
 #define NEXUSFS_HTTP_HTTP_ROUTER_HPP
 
 #include "nexusfs/app/nexusfs_service.hpp"
+#include "nexusfs/cluster/cluster_node_foundation.hpp"
 #include "nexusfs/observability/json_logger.hpp"
 #include "nexusfs/observability/metrics_registry.hpp"
 
@@ -27,8 +28,8 @@ public:
         >;
 
     /*
-     * Constructs a router with private, process-local observability
-     * objects. This preserves compatibility with existing callers.
+     * Constructs a router with private, process-local
+     * observability objects and no cluster services.
      */
     explicit HttpRouter(
         std::shared_ptr<
@@ -38,7 +39,7 @@ public:
 
     /*
      * Constructs a router with an explicitly shared metrics
-     * registry and a disabled logger.
+     * registry and no cluster services.
      */
     HttpRouter(
         std::shared_ptr<
@@ -50,7 +51,8 @@ public:
     );
 
     /*
-     * Constructs a router with daemon-wide shared observability.
+     * Constructs a router with daemon-wide observability and
+     * no cluster services.
      */
     HttpRouter(
         std::shared_ptr<
@@ -62,6 +64,25 @@ public:
         std::shared_ptr<
             observability::JsonLogger
         > logger
+    );
+
+    /*
+     * Constructs a router with daemon-wide observability and
+     * cluster services.
+     */
+    HttpRouter(
+        std::shared_ptr<
+            const app::NexusFsService
+        > service,
+        std::shared_ptr<
+            observability::MetricsRegistry
+        > metrics_registry,
+        std::shared_ptr<
+            observability::JsonLogger
+        > logger,
+        std::shared_ptr<
+            cluster::ClusterNodeFoundation
+        > cluster_node
     );
 
     [[nodiscard]] Response route(
@@ -84,6 +105,11 @@ private:
         const Request& request
     ) const;
 
+    [[nodiscard]] Response
+    route_cluster_request(
+        const Request& request
+    ) const;
+
     void record_operation_metrics(
         const Request& request,
         const Response& response
@@ -95,6 +121,13 @@ private:
     std::shared_ptr<
         const app::NexusFsService
     > service_;
+
+    /*
+     * Null for library routers that do not enable cluster APIs.
+     */
+    std::shared_ptr<
+        cluster::ClusterNodeFoundation
+    > cluster_node_;
 
     std::shared_ptr<
         observability::MetricsRegistry
