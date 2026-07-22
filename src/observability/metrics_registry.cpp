@@ -258,6 +258,16 @@ struct MetricsRegistry::State
     Counter replica_maintenance_scheduler_stops_total{0};
     Counter replica_maintenance_scheduler_failures_total{0};
 
+    Counter metadata_publications_total{0};
+    Counter metadata_publications_succeeded{0};
+    Counter metadata_publications_failed{0};
+
+    Counter remote_manifest_reads_total{0};
+    Counter remote_manifest_reads_succeeded{0};
+    Counter remote_manifest_reads_failed{0};
+
+    Counter local_manifest_repairs_total{0};
+
     mutable std::mutex dimensions_mutex;
 
     std::unordered_map<
@@ -733,6 +743,60 @@ record_replica_maintenance_scheduler_failure()
     );
 }
 
+void MetricsRegistry::record_metadata_publication(
+    bool succeeded
+) noexcept
+{
+    increment_counter(
+        state_->metadata_publications_total
+    );
+
+    if (succeeded)
+    {
+        increment_counter(
+            state_->
+                metadata_publications_succeeded
+        );
+    }
+    else
+    {
+        increment_counter(
+            state_->metadata_publications_failed
+        );
+    }
+}
+
+void MetricsRegistry::record_remote_manifest_read(
+    bool succeeded
+) noexcept
+{
+    increment_counter(
+        state_->remote_manifest_reads_total
+    );
+
+    if (succeeded)
+    {
+        increment_counter(
+            state_->
+                remote_manifest_reads_succeeded
+        );
+    }
+    else
+    {
+        increment_counter(
+            state_->remote_manifest_reads_failed
+        );
+    }
+}
+
+void MetricsRegistry::record_local_manifest_repair()
+    noexcept
+{
+    increment_counter(
+        state_->local_manifest_repairs_total
+    );
+}
+
 MetricsSnapshot MetricsRegistry::snapshot() const
 {
     MetricsSnapshot result;
@@ -1042,6 +1106,43 @@ MetricsSnapshot MetricsRegistry::snapshot() const
             replica_maintenance_scheduler_failures_total.load(
                 std::memory_order_relaxed
             );
+
+    result.metadata_publications_total =
+        state_->metadata_publications_total.load(
+            std::memory_order_relaxed
+        );
+
+    result.metadata_publications_succeeded =
+        state_->
+            metadata_publications_succeeded.load(
+                std::memory_order_relaxed
+            );
+
+    result.metadata_publications_failed =
+        state_->metadata_publications_failed.load(
+            std::memory_order_relaxed
+        );
+
+    result.remote_manifest_reads_total =
+        state_->remote_manifest_reads_total.load(
+            std::memory_order_relaxed
+        );
+
+    result.remote_manifest_reads_succeeded =
+        state_->
+            remote_manifest_reads_succeeded.load(
+                std::memory_order_relaxed
+            );
+
+    result.remote_manifest_reads_failed =
+        state_->remote_manifest_reads_failed.load(
+            std::memory_order_relaxed
+        );
+
+    result.local_manifest_repairs_total =
+        state_->local_manifest_repairs_total.load(
+            std::memory_order_relaxed
+        );
 
     {
         const std::lock_guard lock{

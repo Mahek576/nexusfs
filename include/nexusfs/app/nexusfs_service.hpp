@@ -12,6 +12,7 @@ namespace nexusfs::cluster
 {
 
 class ClusterNodeFoundation;
+class MetadataCoordinator;
 class ReplicaMaintenanceCoordinator;
 class ReplicaRepairCoordinator;
 class ReplicationCoordinator;
@@ -45,6 +46,10 @@ struct StoreFileResult
     std::size_t replication_factor;
     std::size_t remote_replica_acknowledgements;
     bool replication_satisfied;
+
+    std::string metadata_owner_node_id;
+    bool metadata_owner_local;
+    bool metadata_owner_acknowledged;
 };
 
 struct RestoreFileResult
@@ -215,6 +220,10 @@ private:
     };
 
     std::shared_ptr<
+        cluster::MetadataCoordinator
+    > metadata_coordinator_;
+
+    std::shared_ptr<
         cluster::ReplicationCoordinator
     > replication_coordinator_;
 
@@ -225,6 +234,10 @@ private:
     std::shared_ptr<
         cluster::ReplicaMaintenanceCoordinator
     > replica_maintenance_coordinator_;
+
+    void repair_missing_manifest(
+        const std::string& manifest_id
+    ) const;
 
     void repair_missing_manifest_chunks(
         const std::string& manifest_id

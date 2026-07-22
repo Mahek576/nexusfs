@@ -100,6 +100,16 @@ struct MetricsSnapshot
     std::uint64_t replica_maintenance_scheduler_stops_total{0};
     std::uint64_t replica_maintenance_scheduler_failures_total{0};
 
+    std::uint64_t metadata_publications_total{0};
+    std::uint64_t metadata_publications_succeeded{0};
+    std::uint64_t metadata_publications_failed{0};
+
+    std::uint64_t remote_manifest_reads_total{0};
+    std::uint64_t remote_manifest_reads_succeeded{0};
+    std::uint64_t remote_manifest_reads_failed{0};
+
+    std::uint64_t local_manifest_repairs_total{0};
+
     std::vector<NamedCounter> requests_by_method;
     std::vector<HttpRouteCounter> requests_by_route;
     std::vector<HttpStatusCounter> responses_by_status;
@@ -260,6 +270,25 @@ public:
 
     void record_replica_maintenance_scheduler_failure()
         noexcept;
+
+    /*
+     * Records deterministic metadata-owner publication.
+     */
+    void record_metadata_publication(
+        bool succeeded
+    ) noexcept;
+
+    /*
+     * Records one remote manifest-read attempt.
+     */
+    void record_remote_manifest_read(
+        bool succeeded
+    ) noexcept;
+
+    /*
+     * Records one verified local manifest repair.
+     */
+    void record_local_manifest_repair() noexcept;
 
     /*
      * Produces a self-consistent best-effort metrics snapshot.

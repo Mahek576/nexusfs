@@ -698,6 +698,51 @@ HttpRouter::Response make_metrics_response(
                     }
                 },
                 {
+                    "metadata",
+                    {
+                        {
+                            "publications",
+                            {
+                                {
+                                    "total",
+                                    snapshot.metadata_publications_total
+                                },
+                                {
+                                    "succeeded",
+                                    snapshot
+                                        .metadata_publications_succeeded
+                                },
+                                {
+                                    "failed",
+                                    snapshot.metadata_publications_failed
+                                }
+                            }
+                        },
+                        {
+                            "remote_reads",
+                            {
+                                {
+                                    "total",
+                                    snapshot.remote_manifest_reads_total
+                                },
+                                {
+                                    "succeeded",
+                                    snapshot
+                                        .remote_manifest_reads_succeeded
+                                },
+                                {
+                                    "failed",
+                                    snapshot.remote_manifest_reads_failed
+                                }
+                            }
+                        },
+                        {
+                            "local_repairs",
+                            snapshot.local_manifest_repairs_total
+                        }
+                    }
+                },
+                {
                     "recovery",
                     {
                         {
