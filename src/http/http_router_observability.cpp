@@ -37,6 +37,18 @@ constexpr std::string_view cluster_heartbeat_route{
     "/api/v1/cluster/heartbeat"
 };
 
+constexpr std::string_view cluster_members_route{
+    "/api/v1/cluster/members"
+};
+
+constexpr std::string_view cluster_members_join_route{
+    "/api/v1/cluster/members/join"
+};
+
+constexpr std::string_view cluster_members_leave_route{
+    "/api/v1/cluster/members/leave"
+};
+
 constexpr std::string_view cluster_catalog_route{
     "/api/v1/cluster/catalog"
 };
@@ -660,6 +672,36 @@ HttpRouter::Response make_metrics_response(
             "cluster_transport",
             {
                 {
+                    "membership",
+                    {
+                        {
+                            "join_requests",
+                            snapshot
+                                .membership_join_requests_total
+                        },
+                        {
+                            "joins_applied",
+                            snapshot
+                                .membership_join_applied_total
+                        },
+                        {
+                            "leave_requests",
+                            snapshot
+                                .membership_leave_requests_total
+                        },
+                        {
+                            "leaves_applied",
+                            snapshot
+                                .membership_leave_applied_total
+                        },
+                        {
+                            "epoch_conflicts",
+                            snapshot
+                                .membership_epoch_conflicts_total
+                        }
+                    }
+                },
+                {
                     "heartbeats",
                     {
                         {
@@ -1179,6 +1221,21 @@ std::string_view HttpRouter::normalized_route(
     if (target == cluster_heartbeat_route)
     {
         return cluster_heartbeat_route;
+    }
+
+    if (target == cluster_members_route)
+    {
+        return cluster_members_route;
+    }
+
+    if (target == cluster_members_join_route)
+    {
+        return cluster_members_join_route;
+    }
+
+    if (target == cluster_members_leave_route)
+    {
+        return cluster_members_leave_route;
     }
 
     if (target == cluster_catalog_sync_route)
