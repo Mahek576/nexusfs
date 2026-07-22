@@ -1,5 +1,6 @@
 #include "nexusfs/storage/manifest_store.hpp"
 
+#include "nexusfs/storage/durable_file.hpp"
 #include "nexusfs/storage/sha256_hasher.hpp"
 
 #include <algorithm>
@@ -699,19 +700,20 @@ ManifestStoreResult ManifestStore::store(
             );
         }
 
-        std::error_code rename_error;
+        const DurablePublishResult publication_result =
+            publish_file_durably(
+                temporary_path,
+                final_path
+            );
 
-        std::filesystem::rename(
-            temporary_path,
-            final_path,
-            rename_error
-        );
-
-        if (rename_error)
+        if (
+            publication_result ==
+            DurablePublishResult::destination_exists
+        )
         {
             /*
-             * This can still occur when a different process
-             * publishes the same manifest first.
+             * A different process may have durably published the
+             * same content-addressed manifest first.
              */
             const auto concurrently_published_manifest =
                 wait_for_published_manifest(
@@ -719,31 +721,32 @@ ManifestStoreResult ManifestStore::store(
                     manifest_id
                 );
 
-            if (concurrently_published_manifest)
+            if (!concurrently_published_manifest)
             {
-                remove_temporary_file(
-                    temporary_path
+                throw std::runtime_error(
+                    "Manifest destination exists but could not "
+                    "be verified after durable publication: "
+                    + manifest_id
                 );
-
-                if (
-                    *concurrently_published_manifest !=
-                    encoded_manifest
-                )
-                {
-                    throw std::runtime_error(
-                        "Concurrently stored manifest bytes "
-                        "do not match the supplied manifest."
-                    );
-                }
-
-                return
-                    ManifestStoreResult::already_exists;
             }
 
-            throw std::runtime_error(
-                "Failed to finalize manifest file: "
-                + rename_error.message()
+            if (
+                *concurrently_published_manifest !=
+                encoded_manifest
+            )
+            {
+                throw std::runtime_error(
+                    "Concurrently stored manifest bytes "
+                    "do not match the supplied manifest."
+                );
+            }
+
+            remove_temporary_file(
+                temporary_path
             );
+
+            return
+                ManifestStoreResult::already_exists;
         }
     }
     catch (...)

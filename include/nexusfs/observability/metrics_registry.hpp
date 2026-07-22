@@ -67,6 +67,12 @@ struct MetricsSnapshot
     std::uint64_t storage_chunks{0};
     std::uint64_t storage_missing_chunks{0};
 
+    std::uint64_t recovery_runs_total{0};
+    std::uint64_t recovery_entries_scanned{0};
+    std::uint64_t recovery_temporary_entries_found{0};
+    std::uint64_t recovery_temporary_files_removed{0};
+    std::uint64_t recovery_non_regular_entries_preserved{0};
+
     std::vector<NamedCounter> requests_by_method;
     std::vector<HttpRouteCounter> requests_by_route;
     std::vector<HttpStatusCounter> responses_by_status;
@@ -164,6 +170,16 @@ public:
         std::uint64_t incomplete_manifests,
         std::uint64_t chunks,
         std::uint64_t missing_chunks
+    ) noexcept;
+
+    /*
+     * Records one completed startup-recovery scan.
+     */
+    void record_storage_recovery(
+        std::uint64_t entries_scanned,
+        std::uint64_t temporary_entries_found,
+        std::uint64_t temporary_files_removed,
+        std::uint64_t non_regular_entries_preserved
     ) noexcept;
 
     /*

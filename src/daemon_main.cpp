@@ -4,6 +4,7 @@
 #include "nexusfs/http/http_server.hpp"
 #include "nexusfs/observability/json_logger.hpp"
 #include "nexusfs/observability/metrics_registry.hpp"
+#include "nexusfs/storage/storage_recovery.hpp"
 
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/signal_set.hpp>
@@ -144,6 +145,52 @@ int main(
                     static_cast<std::uint64_t>(
                         configuration.chunk_size
                     )
+                }
+            }
+        );
+
+        const nexusfs::storage::
+            StorageRecoveryReport recovery_report =
+                nexusfs::storage::
+                    recover_storage_root(
+                        configuration.storage_root
+                    );
+
+        metrics_registry->
+            record_storage_recovery(
+                recovery_report.entries_scanned,
+                recovery_report
+                    .temporary_entries_found,
+                recovery_report
+                    .temporary_files_removed,
+                recovery_report
+                    .non_regular_entries_preserved
+            );
+
+        logger->log(
+            nexusfs::observability::
+                LogLevel::info,
+            "storage_recovery_completed",
+            "NexusFS storage recovery completed.",
+            {
+                nexusfs::observability::LogField{
+                    "entries_scanned",
+                    recovery_report.entries_scanned
+                },
+                nexusfs::observability::LogField{
+                    "temporary_entries_found",
+                    recovery_report
+                        .temporary_entries_found
+                },
+                nexusfs::observability::LogField{
+                    "temporary_files_removed",
+                    recovery_report
+                        .temporary_files_removed
+                },
+                nexusfs::observability::LogField{
+                    "non_regular_entries_preserved",
+                    recovery_report
+                        .non_regular_entries_preserved
                 }
             }
         );

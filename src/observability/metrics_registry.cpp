@@ -225,6 +225,12 @@ struct MetricsRegistry::State
     Counter storage_chunks{0};
     Counter storage_missing_chunks{0};
 
+    Counter recovery_runs_total{0};
+    Counter recovery_entries_scanned{0};
+    Counter recovery_temporary_entries_found{0};
+    Counter recovery_temporary_files_removed{0};
+    Counter recovery_non_regular_entries_preserved{0};
+
     mutable std::mutex dimensions_mutex;
 
     std::unordered_map<
@@ -493,6 +499,41 @@ void MetricsRegistry::set_storage_catalog(
     );
 }
 
+void MetricsRegistry::record_storage_recovery(
+    std::uint64_t entries_scanned,
+    std::uint64_t temporary_entries_found,
+    std::uint64_t temporary_files_removed,
+    std::uint64_t non_regular_entries_preserved
+) noexcept
+{
+    increment_counter(
+        state_->recovery_runs_total
+    );
+
+    add_to_counter(
+        state_->recovery_entries_scanned,
+        entries_scanned
+    );
+
+    add_to_counter(
+        state_->
+            recovery_temporary_entries_found,
+        temporary_entries_found
+    );
+
+    add_to_counter(
+        state_->
+            recovery_temporary_files_removed,
+        temporary_files_removed
+    );
+
+    add_to_counter(
+        state_->
+            recovery_non_regular_entries_preserved,
+        non_regular_entries_preserved
+    );
+}
+
 MetricsSnapshot MetricsRegistry::snapshot() const
 {
     MetricsSnapshot result;
@@ -649,6 +690,34 @@ MetricsSnapshot MetricsRegistry::snapshot() const
         state_->storage_missing_chunks.load(
             std::memory_order_relaxed
         );
+
+    result.recovery_runs_total =
+        state_->recovery_runs_total.load(
+            std::memory_order_relaxed
+        );
+
+    result.recovery_entries_scanned =
+        state_->recovery_entries_scanned.load(
+            std::memory_order_relaxed
+        );
+
+    result.recovery_temporary_entries_found =
+        state_->
+            recovery_temporary_entries_found.load(
+                std::memory_order_relaxed
+            );
+
+    result.recovery_temporary_files_removed =
+        state_->
+            recovery_temporary_files_removed.load(
+                std::memory_order_relaxed
+            );
+
+    result.recovery_non_regular_entries_preserved =
+        state_->
+            recovery_non_regular_entries_preserved.load(
+                std::memory_order_relaxed
+            );
 
     {
         const std::lock_guard lock{
