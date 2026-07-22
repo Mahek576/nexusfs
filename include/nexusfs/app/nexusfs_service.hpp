@@ -8,6 +8,22 @@
 #include <string>
 #include <vector>
 
+namespace nexusfs::cluster
+{
+
+class ClusterNodeFoundation;
+class ReplicationCoordinator;
+
+}
+
+namespace nexusfs::observability
+{
+
+class JsonLogger;
+class MetricsRegistry;
+
+}
+
 namespace nexusfs::app
 {
 
@@ -23,6 +39,10 @@ struct StoreFileResult
     std::uint64_t bytes_processed;
     std::size_t encoded_manifest_size;
     bool manifest_stored;
+
+    std::size_t replication_factor;
+    std::size_t remote_replica_acknowledgements;
+    bool replication_satisfied;
 };
 
 struct RestoreFileResult
@@ -106,6 +126,22 @@ public:
         std::size_t default_chunk_size = 1024
     );
 
+    NexusFsService(
+        std::filesystem::path storage_root,
+        std::size_t default_chunk_size,
+        std::shared_ptr<
+            cluster::ClusterNodeFoundation
+        > cluster_node,
+        std::size_t replication_factor,
+        bool strict_replication,
+        std::shared_ptr<
+            observability::MetricsRegistry
+        > metrics_registry = nullptr,
+        std::shared_ptr<
+            observability::JsonLogger
+        > logger = nullptr
+    );
+
     /*
      * Storage operation locking model:
      *
@@ -148,6 +184,18 @@ public:
 private:
     std::filesystem::path storage_root_;
     std::size_t default_chunk_size_;
+
+    std::size_t replication_factor_{
+        1
+    };
+
+    bool strict_replication_{
+        true
+    };
+
+    std::shared_ptr<
+        cluster::ReplicationCoordinator
+    > replication_coordinator_;
 
     /*
      * shared_ptr deliberately preserves the original copyability of

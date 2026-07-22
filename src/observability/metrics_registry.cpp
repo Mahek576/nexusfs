@@ -231,6 +231,16 @@ struct MetricsRegistry::State
     Counter recovery_temporary_files_removed{0};
     Counter recovery_non_regular_entries_preserved{0};
 
+    Counter heartbeat_attempts_total{0};
+    Counter heartbeat_attempts_succeeded{0};
+    Counter heartbeat_attempts_failed{0};
+
+    Counter replication_chunks_total{0};
+    Counter replication_chunks_satisfied{0};
+    Counter replication_chunks_failed{0};
+    Counter replication_remote_acknowledgements{0};
+    Counter replication_remote_failures{0};
+
     mutable std::mutex dimensions_mutex;
 
     std::unordered_map<
@@ -534,6 +544,66 @@ void MetricsRegistry::record_storage_recovery(
     );
 }
 
+void MetricsRegistry::record_heartbeat_attempt(
+    bool succeeded
+) noexcept
+{
+    increment_counter(
+        state_->heartbeat_attempts_total
+    );
+
+    if (succeeded)
+    {
+        increment_counter(
+            state_->
+                heartbeat_attempts_succeeded
+        );
+    }
+    else
+    {
+        increment_counter(
+            state_->heartbeat_attempts_failed
+        );
+    }
+}
+
+void MetricsRegistry::record_replication_result(
+    std::uint64_t remote_acknowledgements,
+    std::uint64_t remote_failures,
+    bool satisfied
+) noexcept
+{
+    increment_counter(
+        state_->replication_chunks_total
+    );
+
+    add_to_counter(
+        state_->
+            replication_remote_acknowledgements,
+        remote_acknowledgements
+    );
+
+    add_to_counter(
+        state_->
+            replication_remote_failures,
+        remote_failures
+    );
+
+    if (satisfied)
+    {
+        increment_counter(
+            state_->
+                replication_chunks_satisfied
+        );
+    }
+    else
+    {
+        increment_counter(
+            state_->replication_chunks_failed
+        );
+    }
+}
+
 MetricsSnapshot MetricsRegistry::snapshot() const
 {
     MetricsSnapshot result;
@@ -716,6 +786,50 @@ MetricsSnapshot MetricsRegistry::snapshot() const
     result.recovery_non_regular_entries_preserved =
         state_->
             recovery_non_regular_entries_preserved.load(
+                std::memory_order_relaxed
+            );
+
+    result.heartbeat_attempts_total =
+        state_->heartbeat_attempts_total.load(
+            std::memory_order_relaxed
+        );
+
+    result.heartbeat_attempts_succeeded =
+        state_->
+            heartbeat_attempts_succeeded.load(
+                std::memory_order_relaxed
+            );
+
+    result.heartbeat_attempts_failed =
+        state_->heartbeat_attempts_failed.load(
+            std::memory_order_relaxed
+        );
+
+    result.replication_chunks_total =
+        state_->replication_chunks_total.load(
+            std::memory_order_relaxed
+        );
+
+    result.replication_chunks_satisfied =
+        state_->
+            replication_chunks_satisfied.load(
+                std::memory_order_relaxed
+            );
+
+    result.replication_chunks_failed =
+        state_->replication_chunks_failed.load(
+            std::memory_order_relaxed
+        );
+
+    result.replication_remote_acknowledgements =
+        state_->
+            replication_remote_acknowledgements.load(
+                std::memory_order_relaxed
+            );
+
+    result.replication_remote_failures =
+        state_->
+            replication_remote_failures.load(
                 std::memory_order_relaxed
             );
 

@@ -1,14 +1,19 @@
 #include "nexusfs/http/http_router.hpp"
 
+#include "nexusfs/storage/chunk_store.hpp"
+
 #include <boost/beast/http.hpp>
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 namespace nexusfs::http
 {
@@ -27,6 +32,18 @@ constexpr std::string_view heartbeat_route{
     "/api/v1/cluster/heartbeat"
 };
 
+constexpr std::string_view cluster_chunk_prefix{
+    "/api/v1/cluster/chunks/"
+};
+
+constexpr std::string_view cluster_header{
+    "X-NexusFS-Cluster-ID"
+};
+
+constexpr std::string_view node_header{
+    "X-NexusFS-Node-ID"
+};
+
 std::string_view request_target(
     const HttpRouter::Request& request
 ) noexcept
@@ -38,6 +55,32 @@ std::string_view request_target(
         target.data(),
         target.size()
     };
+}
+
+bool is_lowercase_sha256_identifier(
+    std::string_view value
+) noexcept
+{
+    return (
+        value.size() == 64
+        && std::all_of(
+            value.begin(),
+            value.end(),
+            [](char character)
+            {
+                return (
+                    (
+                        character >= '0'
+                        && character <= '9'
+                    )
+                    || (
+                        character >= 'a'
+                        && character <= 'f'
+                    )
+                );
+            }
+        )
+    );
 }
 
 HttpRouter::Response make_json_response(
@@ -72,6 +115,60 @@ HttpRouter::Response make_json_response(
 
     response.body() =
         payload.dump();
+
+    response.prepare_payload();
+
+    return response;
+}
+
+HttpRouter::Response make_binary_response(
+    const std::vector<std::uint8_t>& data,
+    const std::string& chunk_hash,
+    const HttpRouter::Request& request
+)
+{
+    HttpRouter::Response response{
+        beast_http::status::ok,
+        request.version()
+    };
+
+    response.set(
+        beast_http::field::server,
+        "NexusFS"
+    );
+
+    response.set(
+        beast_http::field::content_type,
+        "application/octet-stream"
+    );
+
+    response.set(
+        beast_http::field::cache_control,
+        "no-store"
+    );
+
+    response.set(
+        "X-NexusFS-Chunk-Hash",
+        chunk_hash
+    );
+
+    response.keep_alive(
+        request.keep_alive()
+    );
+
+    if (data.empty())
+    {
+        response.body().clear();
+    }
+    else
+    {
+        response.body().assign(
+            reinterpret_cast<const char*>(
+                data.data()
+            ),
+            data.size()
+        );
+    }
 
     response.prepare_payload();
 
@@ -129,6 +226,57 @@ HttpRouter::Response make_method_response(
     );
 
     return response;
+}
+
+bool is_configured_peer(
+    const cluster::ClusterNodeFoundation& cluster_node,
+    std::string_view node_id
+)
+{
+    return std::any_of(
+        cluster_node
+            .configuration()
+            .peers
+            .begin(),
+        cluster_node
+            .configuration()
+            .peers
+            .end(),
+        [node_id](
+            const cluster::PeerDefinition& peer
+        )
+        {
+            return peer.node_id == node_id;
+        }
+    );
+}
+
+bool is_authorized_peer_request(
+    const HttpRouter::Request& request,
+    const cluster::ClusterNodeFoundation& cluster_node
+)
+{
+    const auto supplied_cluster =
+        request[cluster_header];
+
+    const auto supplied_node =
+        request[node_header];
+
+    return (
+        !supplied_cluster.empty()
+        && !supplied_node.empty()
+        && supplied_cluster ==
+            cluster_node
+                .configuration()
+                .cluster_id
+        && is_configured_peer(
+            cluster_node,
+            std::string_view{
+                supplied_node.data(),
+                supplied_node.size()
+            }
+        )
+    );
 }
 
 nlohmann::ordered_json make_peer_payload(
@@ -270,6 +418,186 @@ nlohmann::ordered_json make_cluster_payload(
     };
 }
 
+HttpRouter::Response handle_chunk_request(
+    const HttpRouter::Request& request,
+    const std::shared_ptr<
+        const app::NexusFsService
+    >& service,
+    const std::shared_ptr<
+        cluster::ClusterNodeFoundation
+    >& cluster_node
+)
+{
+    if (
+        !is_authorized_peer_request(
+            request,
+            *cluster_node
+        )
+    )
+    {
+        return make_error_response(
+            beast_http::status::forbidden,
+            "peer_not_authorized",
+            "The cluster chunk request did not "
+            "provide an authorized peer identity.",
+            request
+        );
+    }
+
+    const std::string_view target =
+        request_target(
+            request
+        );
+
+    const std::string_view hash_view =
+        target.substr(
+            cluster_chunk_prefix.size()
+        );
+
+    if (
+        !is_lowercase_sha256_identifier(
+            hash_view
+        )
+    )
+    {
+        return make_error_response(
+            beast_http::status::bad_request,
+            "invalid_chunk_hash",
+            "The cluster chunk hash must contain "
+            "64 lowercase hexadecimal characters.",
+            request
+        );
+    }
+
+    const std::string chunk_hash{
+        hash_view
+    };
+
+    storage::ChunkStore chunk_store{
+        service->storage_root()
+    };
+
+    if (
+        request.method() ==
+        beast_http::verb::put
+    )
+    {
+        try
+        {
+            const std::vector<std::uint8_t> data{
+                request.body().begin(),
+                request.body().end()
+            };
+
+            const storage::StoreResult result =
+                chunk_store.store(
+                    storage::FileChunk{
+                        0,
+                        data,
+                        chunk_hash
+                    }
+                );
+
+            const bool stored =
+                result ==
+                storage::StoreResult::stored;
+
+            const nlohmann::ordered_json payload = {
+                {
+                    "chunk_hash",
+                    chunk_hash
+                },
+                {
+                    "bytes",
+                    data.size()
+                },
+                {
+                    "result",
+                    stored
+                        ? "stored"
+                        : "already_exists"
+                }
+            };
+
+            return make_json_response(
+                stored
+                    ? beast_http::status::created
+                    : beast_http::status::ok,
+                payload,
+                request
+            );
+        }
+        catch (const std::invalid_argument& error)
+        {
+            return make_error_response(
+                beast_http::status::bad_request,
+                "invalid_chunk",
+                error.what(),
+                request
+            );
+        }
+        catch (const std::exception&)
+        {
+            return make_error_response(
+                beast_http::status::
+                    internal_server_error,
+                "chunk_publication_failed",
+                "The replicated chunk could not "
+                "be published.",
+                request
+            );
+        }
+    }
+
+    if (
+        request.method() ==
+        beast_http::verb::get
+    )
+    {
+        try
+        {
+            if (
+                !chunk_store.contains(
+                    chunk_hash
+                )
+            )
+            {
+                return make_error_response(
+                    beast_http::status::not_found,
+                    "chunk_not_found",
+                    "The requested replicated chunk "
+                    "is not stored on this node.",
+                    request
+                );
+            }
+
+            return make_binary_response(
+                chunk_store.load(
+                    chunk_hash
+                ),
+                chunk_hash,
+                request
+            );
+        }
+        catch (const std::exception&)
+        {
+            return make_error_response(
+                beast_http::status::
+                    internal_server_error,
+                "chunk_load_failed",
+                "The replicated chunk could not "
+                "be loaded.",
+                request
+            );
+        }
+    }
+
+    return make_method_response(
+        "GET, PUT",
+        request
+    );
+}
+
 }
 
 HttpRouter::HttpRouter(
@@ -325,6 +653,19 @@ HttpRouter::route_cluster_request(
         request_target(
             request
         );
+
+    if (
+        target.starts_with(
+            cluster_chunk_prefix
+        )
+    )
+    {
+        return handle_chunk_request(
+            request,
+            service_,
+            cluster_node_
+        );
+    }
 
     if (target == cluster_route)
     {

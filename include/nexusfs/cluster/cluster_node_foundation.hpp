@@ -2,6 +2,7 @@
 #define NEXUSFS_CLUSTER_CLUSTER_NODE_FOUNDATION_HPP
 
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <memory>
@@ -37,6 +38,22 @@ struct ClusterConfiguration
 
     std::uint64_t failure_timeout_ms{
         5000
+    };
+
+    /*
+     * Includes the local copy. A value of two means one local
+     * copy plus one acknowledged remote copy.
+     */
+    std::size_t replication_factor{
+        1
+    };
+
+    /*
+     * When enabled, a file manifest is not published until
+     * every chunk reaches its configured replication factor.
+     */
+    bool strict_replication{
+        true
     };
 
     std::vector<PeerDefinition> peers;

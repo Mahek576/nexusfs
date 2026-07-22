@@ -1,5 +1,6 @@
 #include "nexusfs/app/nexusfs_service.hpp"
 #include "nexusfs/cluster/cluster_node_foundation.hpp"
+#include "nexusfs/cluster/heartbeat_scheduler.hpp"
 #include "nexusfs/daemon/daemon_configuration.hpp"
 #include "nexusfs/http/http_router.hpp"
 #include "nexusfs/http/http_server.hpp"
@@ -248,12 +249,28 @@ int main(
             }
         );
 
+        nexusfs::cluster::
+            HeartbeatScheduler heartbeat_scheduler{
+                cluster_node,
+                metrics_registry,
+                logger
+            };
+
         const auto service =
             std::make_shared<
                 nexusfs::app::NexusFsService
             >(
                 configuration.storage_root,
-                configuration.chunk_size
+                configuration.chunk_size,
+                cluster_node,
+                cluster_node
+                    ->configuration()
+                    .replication_factor,
+                cluster_node
+                    ->configuration()
+                    .strict_replication,
+                metrics_registry,
+                logger
             );
 
         const nexusfs::http::HttpRouter router{
@@ -334,6 +351,8 @@ int main(
             "NexusFS daemon is starting."
         );
 
+        heartbeat_scheduler.start();
+
         try
         {
             server.run();
@@ -341,6 +360,7 @@ int main(
         catch (...)
         {
             server.stop();
+            heartbeat_scheduler.stop();
 
             stop_signal_context(
                 signal_context,
@@ -357,6 +377,8 @@ int main(
 
             throw;
         }
+
+        heartbeat_scheduler.stop();
 
         stop_signal_context(
             signal_context,

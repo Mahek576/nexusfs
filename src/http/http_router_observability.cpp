@@ -37,6 +37,14 @@ constexpr std::string_view cluster_heartbeat_route{
     "/api/v1/cluster/heartbeat"
 };
 
+constexpr std::string_view cluster_chunk_prefix{
+    "/api/v1/cluster/chunks/"
+};
+
+constexpr std::string_view normalized_cluster_chunk_route{
+    "/api/v1/cluster/chunks/{chunk_hash}"
+};
+
 constexpr std::string_view files_route{
     "/api/v1/files"
 };
@@ -631,6 +639,57 @@ HttpRouter::Response make_metrics_response(
                         .recovery_non_regular_entries_preserved
                 }
             }
+        },
+        {
+            "cluster_transport",
+            {
+                {
+                    "heartbeats",
+                    {
+                        {
+                            "attempted",
+                            snapshot.heartbeat_attempts_total
+                        },
+                        {
+                            "succeeded",
+                            snapshot
+                                .heartbeat_attempts_succeeded
+                        },
+                        {
+                            "failed",
+                            snapshot.heartbeat_attempts_failed
+                        }
+                    }
+                },
+                {
+                    "replication",
+                    {
+                        {
+                            "chunks_total",
+                            snapshot.replication_chunks_total
+                        },
+                        {
+                            "chunks_satisfied",
+                            snapshot
+                                .replication_chunks_satisfied
+                        },
+                        {
+                            "chunks_failed",
+                            snapshot.replication_chunks_failed
+                        },
+                        {
+                            "remote_acknowledgements",
+                            snapshot
+                                .replication_remote_acknowledgements
+                        },
+                        {
+                            "remote_failures",
+                            snapshot
+                                .replication_remote_failures
+                        }
+                    }
+                }
+            }
         }
     };
 
@@ -923,6 +982,24 @@ std::string_view HttpRouter::normalized_route(
     if (target == cluster_heartbeat_route)
     {
         return cluster_heartbeat_route;
+    }
+
+    if (
+        target.starts_with(
+            cluster_chunk_prefix
+        )
+    )
+    {
+        const std::string_view chunk_hash =
+            target.substr(
+                cluster_chunk_prefix.size()
+            );
+
+        return is_lowercase_sha256_identifier(
+            chunk_hash
+        )
+            ? normalized_cluster_chunk_route
+            : unmatched_route;
     }
 
     if (target == files_route)
