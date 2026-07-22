@@ -2,6 +2,7 @@
 
 #include "nexusfs/cluster/peer_transport.hpp"
 #include "nexusfs/cluster/replica_repair.hpp"
+#include "nexusfs/cluster/replica_maintenance.hpp"
 #include "nexusfs/observability/json_logger.hpp"
 #include "nexusfs/observability/metrics_registry.hpp"
 #include "nexusfs/storage/chunk_store.hpp"
@@ -25,6 +26,7 @@
 #include <string>
 #include <system_error>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -478,6 +480,19 @@ NexusFsService::NexusFsService(
                 cluster::ReplicaRepairCoordinator
             >(
                 cluster_node,
+                std::chrono::milliseconds{
+                    3000
+                },
+                metrics_registry,
+                logger
+            );
+
+        replica_maintenance_coordinator_ =
+            std::make_shared<
+                cluster::ReplicaMaintenanceCoordinator
+            >(
+                cluster_node,
+                replication_factor_,
                 std::chrono::milliseconds{
                     3000
                 },
@@ -1155,6 +1170,97 @@ ListFilesResult NexusFsService::list_files() const
         std::move(files),
         complete_manifests,
         incomplete_manifests
+    };
+}
+
+RepairReplicasResult
+NexusFsService::repair_replicas() const
+{
+    if (!replica_maintenance_coordinator_)
+    {
+        return RepairReplicasResult{
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            true
+        };
+    }
+
+    /*
+     * Maintenance may durably publish missing local chunks, so the
+     * sweep uses the exclusive process-wide storage lock.
+     */
+    const std::unique_lock storage_lock{
+        concurrency_state_->
+            storage_mutex
+    };
+
+    storage::ChunkStore chunk_store{
+        storage_root_
+    };
+
+    const storage::ManifestStore manifest_store{
+        storage_root_
+    };
+
+    const std::vector<std::string>
+        manifest_ids =
+            manifest_store
+                .list_manifest_ids();
+
+    std::unordered_set<std::string>
+        unique_chunk_hashes;
+
+    for (
+        const std::string& manifest_id :
+        manifest_ids
+    )
+    {
+        const LoadedManifest loaded_manifest =
+            load_canonical_manifest(
+                manifest_store,
+                manifest_id
+            );
+
+        for (
+            const std::string& chunk_hash :
+            loaded_manifest.manifest
+                .chunk_hashes()
+        )
+        {
+            unique_chunk_hashes.insert(
+                chunk_hash
+            );
+        }
+    }
+
+    const std::vector<std::string>
+        chunk_hashes{
+            unique_chunk_hashes.begin(),
+            unique_chunk_hashes.end()
+        };
+
+    const cluster::ReplicaMaintenanceReport
+        report =
+            replica_maintenance_coordinator_->
+                repair_chunks(
+                    chunk_hashes,
+                    chunk_store
+                );
+
+    return RepairReplicasResult{
+        manifest_ids.size(),
+        report.chunks_scanned,
+        report.local_chunks_recovered,
+        report.remote_replicas_observed,
+        report.remote_replicas_created,
+        report.peer_failures,
+        report.under_replicated_chunks,
+        report.fully_repaired
     };
 }
 

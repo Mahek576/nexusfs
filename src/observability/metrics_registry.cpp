@@ -246,6 +246,14 @@ struct MetricsRegistry::State
     Counter remote_chunk_reads_failed{0};
     Counter local_chunk_repairs_total{0};
 
+    Counter replica_maintenance_runs_total{0};
+    Counter replica_maintenance_chunks_scanned{0};
+    Counter replica_maintenance_local_chunks_recovered{0};
+    Counter replica_maintenance_remote_replicas_observed{0};
+    Counter replica_maintenance_remote_replicas_created{0};
+    Counter replica_maintenance_peer_failures{0};
+    Counter replica_maintenance_under_replicated_chunks{0};
+
     mutable std::mutex dimensions_mutex;
 
     std::unordered_map<
@@ -640,6 +648,57 @@ void MetricsRegistry::record_local_chunk_repair()
     );
 }
 
+void MetricsRegistry::record_replica_maintenance(
+    std::uint64_t chunks_scanned,
+    std::uint64_t local_chunks_recovered,
+    std::uint64_t remote_replicas_observed,
+    std::uint64_t remote_replicas_created,
+    std::uint64_t peer_failures,
+    std::uint64_t under_replicated_chunks
+) noexcept
+{
+    increment_counter(
+        state_->
+            replica_maintenance_runs_total
+    );
+
+    add_to_counter(
+        state_->
+            replica_maintenance_chunks_scanned,
+        chunks_scanned
+    );
+
+    add_to_counter(
+        state_->
+            replica_maintenance_local_chunks_recovered,
+        local_chunks_recovered
+    );
+
+    add_to_counter(
+        state_->
+            replica_maintenance_remote_replicas_observed,
+        remote_replicas_observed
+    );
+
+    add_to_counter(
+        state_->
+            replica_maintenance_remote_replicas_created,
+        remote_replicas_created
+    );
+
+    add_to_counter(
+        state_->
+            replica_maintenance_peer_failures,
+        peer_failures
+    );
+
+    add_to_counter(
+        state_->
+            replica_maintenance_under_replicated_chunks,
+        under_replicated_chunks
+    );
+}
+
 MetricsSnapshot MetricsRegistry::snapshot() const
 {
     MetricsSnapshot result;
@@ -889,6 +948,48 @@ MetricsSnapshot MetricsRegistry::snapshot() const
         state_->local_chunk_repairs_total.load(
             std::memory_order_relaxed
         );
+
+    result.replica_maintenance_runs_total =
+        state_->
+            replica_maintenance_runs_total.load(
+                std::memory_order_relaxed
+            );
+
+    result.replica_maintenance_chunks_scanned =
+        state_->
+            replica_maintenance_chunks_scanned.load(
+                std::memory_order_relaxed
+            );
+
+    result.replica_maintenance_local_chunks_recovered =
+        state_->
+            replica_maintenance_local_chunks_recovered.load(
+                std::memory_order_relaxed
+            );
+
+    result.replica_maintenance_remote_replicas_observed =
+        state_->
+            replica_maintenance_remote_replicas_observed.load(
+                std::memory_order_relaxed
+            );
+
+    result.replica_maintenance_remote_replicas_created =
+        state_->
+            replica_maintenance_remote_replicas_created.load(
+                std::memory_order_relaxed
+            );
+
+    result.replica_maintenance_peer_failures =
+        state_->
+            replica_maintenance_peer_failures.load(
+                std::memory_order_relaxed
+            );
+
+    result.replica_maintenance_under_replicated_chunks =
+        state_->
+            replica_maintenance_under_replicated_chunks.load(
+                std::memory_order_relaxed
+            );
 
     {
         const std::lock_guard lock{

@@ -710,6 +710,45 @@ HttpRouter::Response make_metrics_response(
                             snapshot.local_chunk_repairs_total
                         }
                     }
+                },
+                {
+                    "maintenance",
+                    {
+                        {
+                            "runs",
+                            snapshot.replica_maintenance_runs_total
+                        },
+                        {
+                            "chunks_scanned",
+                            snapshot
+                                .replica_maintenance_chunks_scanned
+                        },
+                        {
+                            "local_chunks_recovered",
+                            snapshot
+                                .replica_maintenance_local_chunks_recovered
+                        },
+                        {
+                            "remote_replicas_observed",
+                            snapshot
+                                .replica_maintenance_remote_replicas_observed
+                        },
+                        {
+                            "remote_replicas_created",
+                            snapshot
+                                .replica_maintenance_remote_replicas_created
+                        },
+                        {
+                            "peer_failures",
+                            snapshot
+                                .replica_maintenance_peer_failures
+                        },
+                        {
+                            "under_replicated_chunks",
+                            snapshot
+                                .replica_maintenance_under_replicated_chunks
+                        }
+                    }
                 }
             }
         }

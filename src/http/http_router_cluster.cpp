@@ -175,6 +175,48 @@ HttpRouter::Response make_binary_response(
     return response;
 }
 
+HttpRouter::Response make_empty_response(
+    beast_http::status status,
+    const std::string& chunk_hash,
+    const HttpRouter::Request& request
+)
+{
+    HttpRouter::Response response{
+        status,
+        request.version()
+    };
+
+    response.set(
+        beast_http::field::server,
+        "NexusFS"
+    );
+
+    response.set(
+        beast_http::field::cache_control,
+        "no-store"
+    );
+
+    if (!chunk_hash.empty())
+    {
+        response.set(
+            "X-NexusFS-Chunk-Hash",
+            chunk_hash
+        );
+    }
+
+    response.keep_alive(
+        request.keep_alive()
+    );
+
+    response.body().clear();
+
+    response.content_length(
+        0
+    );
+
+    return response;
+}
+
 HttpRouter::Response make_error_response(
     beast_http::status status,
     std::string code,
@@ -551,6 +593,51 @@ HttpRouter::Response handle_chunk_request(
 
     if (
         request.method() ==
+        beast_http::verb::head
+    )
+    {
+        try
+        {
+            if (
+                !chunk_store.contains(
+                    chunk_hash
+                )
+            )
+            {
+                return make_empty_response(
+                    beast_http::status::not_found,
+                    {},
+                    request
+                );
+            }
+
+            /*
+             * load() verifies the content-addressed object rather
+             * than merely checking that a filesystem entry exists.
+             */
+            (void)chunk_store.load(
+                chunk_hash
+            );
+
+            return make_empty_response(
+                beast_http::status::ok,
+                chunk_hash,
+                request
+            );
+        }
+        catch (const std::exception&)
+        {
+            return make_empty_response(
+                beast_http::status::
+                    internal_server_error,
+                {},
+                request
+            );
+        }
+    }
+
+    if (
+        request.method() ==
         beast_http::verb::get
     )
     {
@@ -593,7 +680,7 @@ HttpRouter::Response handle_chunk_request(
     }
 
     return make_method_response(
-        "GET, PUT",
+        "HEAD, GET, PUT",
         request
     );
 }

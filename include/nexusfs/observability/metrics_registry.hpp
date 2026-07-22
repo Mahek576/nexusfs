@@ -88,6 +88,14 @@ struct MetricsSnapshot
     std::uint64_t remote_chunk_reads_failed{0};
     std::uint64_t local_chunk_repairs_total{0};
 
+    std::uint64_t replica_maintenance_runs_total{0};
+    std::uint64_t replica_maintenance_chunks_scanned{0};
+    std::uint64_t replica_maintenance_local_chunks_recovered{0};
+    std::uint64_t replica_maintenance_remote_replicas_observed{0};
+    std::uint64_t replica_maintenance_remote_replicas_created{0};
+    std::uint64_t replica_maintenance_peer_failures{0};
+    std::uint64_t replica_maintenance_under_replicated_chunks{0};
+
     std::vector<NamedCounter> requests_by_method;
     std::vector<HttpRouteCounter> requests_by_route;
     std::vector<HttpStatusCounter> responses_by_status;
@@ -224,6 +232,18 @@ public:
      * Records one verified local chunk repair.
      */
     void record_local_chunk_repair() noexcept;
+
+    /*
+     * Records one completed proactive replica-maintenance sweep.
+     */
+    void record_replica_maintenance(
+        std::uint64_t chunks_scanned,
+        std::uint64_t local_chunks_recovered,
+        std::uint64_t remote_replicas_observed,
+        std::uint64_t remote_replicas_created,
+        std::uint64_t peer_failures,
+        std::uint64_t under_replicated_chunks
+    ) noexcept;
 
     /*
      * Produces a self-consistent best-effort metrics snapshot.

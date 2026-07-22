@@ -71,6 +71,11 @@ public:
         const PeerDefinition& peer
     );
 
+    [[nodiscard]] bool chunk_exists(
+        const PeerDefinition& peer,
+        const std::string& chunk_hash
+    );
+
     [[nodiscard]] RemoteChunkStoreResult
     store_chunk(
         const PeerDefinition& peer,

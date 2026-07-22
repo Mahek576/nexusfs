@@ -433,6 +433,95 @@ void PeerTransport::send_heartbeat(
     }
 }
 
+bool PeerTransport::chunk_exists(
+    const PeerDefinition& peer,
+    const std::string& chunk_hash
+)
+{
+    if (!is_lowercase_sha256(chunk_hash))
+    {
+        throw std::invalid_argument(
+            "Remote chunk hash must contain exactly "
+            "64 lowercase hexadecimal characters."
+        );
+    }
+
+    try
+    {
+        const auto response =
+            perform_request(
+                *cluster_node_,
+                peer,
+                beast_http::verb::head,
+                "/api/v1/cluster/chunks/"
+                    + chunk_hash,
+                {},
+                {},
+                timeout_
+            );
+
+        if (
+            response.result() ==
+            beast_http::status::not_found
+        )
+        {
+            record_peer_success(
+                peer
+            );
+
+            return false;
+        }
+
+        if (
+            response.result() !=
+            beast_http::status::ok
+        )
+        {
+            throw std::runtime_error(
+                "Remote chunk probe returned HTTP "
+                + std::to_string(
+                    response.result_int()
+                )
+                + "."
+            );
+        }
+
+        const auto supplied_hash =
+            response[
+                "X-NexusFS-Chunk-Hash"
+            ];
+
+        if (
+            supplied_hash.empty()
+            || std::string_view{
+                   supplied_hash.data(),
+                   supplied_hash.size()
+               } != chunk_hash
+        )
+        {
+            throw std::runtime_error(
+                "Remote chunk probe acknowledgement "
+                "is invalid."
+            );
+        }
+
+        record_peer_success(
+            peer
+        );
+
+        return true;
+    }
+    catch (const std::exception& error)
+    {
+        record_peer_failure(
+            peer,
+            error.what()
+        );
+
+        throw;
+    }
+}
+
 RemoteChunkStoreResult PeerTransport::store_chunk(
     const PeerDefinition& peer,
     const std::string& chunk_hash,
