@@ -1405,6 +1405,9 @@ HttpRouter::Response HttpRouter::route_application(
         || target.starts_with(
             "/api/v1/cluster/chunks/"
         )
+        || target.starts_with(
+            "/api/v1/cluster/manifests/"
+        )
     )
     {
         return route_cluster_request(

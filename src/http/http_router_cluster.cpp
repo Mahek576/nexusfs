@@ -36,6 +36,10 @@ constexpr std::string_view cluster_chunk_prefix{
     "/api/v1/cluster/chunks/"
 };
 
+constexpr std::string_view cluster_manifest_prefix{
+    "/api/v1/cluster/manifests/"
+};
+
 constexpr std::string_view cluster_header{
     "X-NexusFS-Cluster-ID"
 };
@@ -740,6 +744,17 @@ HttpRouter::route_cluster_request(
         request_target(
             request
         );
+
+    if (
+        target.starts_with(
+            cluster_manifest_prefix
+        )
+    )
+    {
+        return route_cluster_manifest_request(
+            request
+        );
+    }
 
     if (
         target.starts_with(

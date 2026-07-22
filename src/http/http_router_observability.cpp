@@ -45,6 +45,14 @@ constexpr std::string_view normalized_cluster_chunk_route{
     "/api/v1/cluster/chunks/{chunk_hash}"
 };
 
+constexpr std::string_view cluster_manifest_prefix{
+    "/api/v1/cluster/manifests/"
+};
+
+constexpr std::string_view normalized_cluster_manifest_route{
+    "/api/v1/cluster/manifests/{manifest_id}"
+};
+
 constexpr std::string_view files_route{
     "/api/v1/files"
 };
@@ -1080,6 +1088,24 @@ std::string_view HttpRouter::normalized_route(
             chunk_hash
         )
             ? normalized_cluster_chunk_route
+            : unmatched_route;
+    }
+
+    if (
+        target.starts_with(
+            cluster_manifest_prefix
+        )
+    )
+    {
+        const std::string_view manifest_id =
+            target.substr(
+                cluster_manifest_prefix.size()
+            );
+
+        return is_lowercase_sha256_identifier(
+            manifest_id
+        )
+            ? normalized_cluster_manifest_route
             : unmatched_route;
     }
 

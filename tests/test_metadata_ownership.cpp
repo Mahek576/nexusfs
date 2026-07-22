@@ -342,6 +342,44 @@ void test_primary_matches_order_head()
     );
 }
 
+void test_manifest_ids_influence_placement()
+{
+    const auto identity =
+        make_local_identity();
+
+    const auto configuration =
+        make_configuration();
+
+    std::unordered_set<std::string>
+        selected_owner_ids;
+
+    for (
+        std::size_t index = 0;
+        index < 256;
+        ++index
+    )
+    {
+        selected_owner_ids.insert(
+            nexusfs::cluster::
+                MetadataOwnership::select_owner(
+                    manifest_id_for(
+                        "placement-distribution-"
+                        + std::to_string(
+                            index
+                        )
+                    ),
+                    identity,
+                    configuration
+                ).node_id
+        );
+    }
+
+    require_true(
+        selected_owner_ids.size() >= 2,
+        "Manifest-dependent metadata placement test"
+    );
+}
+
 void test_invalid_inputs()
 {
     const auto identity =
@@ -421,6 +459,11 @@ int main()
 
         std::cout
             << "[PASS] Primary metadata owner ordering\n";
+
+        test_manifest_ids_influence_placement();
+
+        std::cout
+            << "[PASS] Manifest-dependent metadata placement\n";
 
         test_invalid_inputs();
 

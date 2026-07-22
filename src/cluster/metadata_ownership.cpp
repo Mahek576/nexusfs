@@ -218,13 +218,21 @@ MetadataOwnership::ordered_owners(
         candidates
     )
     {
+        /*
+         * Calculate the rendezvous score before moving the owner.
+         * Scoring a moved-from candidate can discard its node ID
+         * and collapse placement into deterministic tie-breaking.
+         */
+        std::string score =
+            ownership_score(
+                manifest_id,
+                candidate
+            );
+
         scored.push_back(
             ScoredOwner{
                 std::move(candidate),
-                ownership_score(
-                    manifest_id,
-                    candidate
-                )
+                std::move(score)
             }
         );
     }
