@@ -110,6 +110,19 @@ struct MetricsSnapshot
 
     std::uint64_t local_manifest_repairs_total{0};
 
+    std::uint64_t metadata_catalog_sync_runs_total{0};
+    std::uint64_t metadata_catalog_sync_converged_total{0};
+    std::uint64_t metadata_catalog_sync_incomplete_total{0};
+
+    std::uint64_t metadata_catalog_peers_contacted{0};
+    std::uint64_t metadata_catalog_peers_succeeded{0};
+    std::uint64_t metadata_catalog_peers_failed{0};
+
+    std::uint64_t metadata_catalog_entries_observed{0};
+    std::uint64_t metadata_catalog_manifests_recovered{0};
+    std::uint64_t metadata_catalog_manifests_unrecovered{0};
+    std::uint64_t metadata_catalog_conflicts{0};
+
     std::vector<NamedCounter> requests_by_method;
     std::vector<HttpRouteCounter> requests_by_route;
     std::vector<HttpStatusCounter> responses_by_status;
@@ -289,6 +302,19 @@ public:
      * Records one verified local manifest repair.
      */
     void record_local_manifest_repair() noexcept;
+
+    /*
+     * Records one cluster metadata-catalog synchronization run.
+     */
+    void record_metadata_catalog_sync(
+        std::uint64_t peers_contacted,
+        std::uint64_t peers_succeeded,
+        std::uint64_t entries_observed,
+        std::uint64_t manifests_recovered,
+        std::uint64_t manifests_unrecovered,
+        std::uint64_t conflicts,
+        bool converged
+    ) noexcept;
 
     /*
      * Produces a self-consistent best-effort metrics snapshot.

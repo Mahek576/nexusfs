@@ -268,6 +268,19 @@ struct MetricsRegistry::State
 
     Counter local_manifest_repairs_total{0};
 
+    Counter metadata_catalog_sync_runs_total{0};
+    Counter metadata_catalog_sync_converged_total{0};
+    Counter metadata_catalog_sync_incomplete_total{0};
+
+    Counter metadata_catalog_peers_contacted{0};
+    Counter metadata_catalog_peers_succeeded{0};
+    Counter metadata_catalog_peers_failed{0};
+
+    Counter metadata_catalog_entries_observed{0};
+    Counter metadata_catalog_manifests_recovered{0};
+    Counter metadata_catalog_manifests_unrecovered{0};
+    Counter metadata_catalog_conflicts{0};
+
     mutable std::mutex dimensions_mutex;
 
     std::unordered_map<
@@ -797,6 +810,75 @@ void MetricsRegistry::record_local_manifest_repair()
     );
 }
 
+void MetricsRegistry::record_metadata_catalog_sync(
+    std::uint64_t peers_contacted,
+    std::uint64_t peers_succeeded,
+    std::uint64_t entries_observed,
+    std::uint64_t manifests_recovered,
+    std::uint64_t manifests_unrecovered,
+    std::uint64_t conflicts,
+    bool converged
+) noexcept
+{
+    increment_counter(
+        state_->metadata_catalog_sync_runs_total
+    );
+
+    if (converged)
+    {
+        increment_counter(
+            state_->
+                metadata_catalog_sync_converged_total
+        );
+    }
+    else
+    {
+        increment_counter(
+            state_->
+                metadata_catalog_sync_incomplete_total
+        );
+    }
+
+    add_to_counter(
+        state_->metadata_catalog_peers_contacted,
+        peers_contacted
+    );
+
+    add_to_counter(
+        state_->metadata_catalog_peers_succeeded,
+        peers_succeeded
+    );
+
+    add_to_counter(
+        state_->metadata_catalog_peers_failed,
+        peers_contacted >= peers_succeeded
+            ? peers_contacted - peers_succeeded
+            : 0
+    );
+
+    add_to_counter(
+        state_->metadata_catalog_entries_observed,
+        entries_observed
+    );
+
+    add_to_counter(
+        state_->
+            metadata_catalog_manifests_recovered,
+        manifests_recovered
+    );
+
+    add_to_counter(
+        state_->
+            metadata_catalog_manifests_unrecovered,
+        manifests_unrecovered
+    );
+
+    add_to_counter(
+        state_->metadata_catalog_conflicts,
+        conflicts
+    );
+}
+
 MetricsSnapshot MetricsRegistry::snapshot() const
 {
     MetricsSnapshot result;
@@ -1143,6 +1225,66 @@ MetricsSnapshot MetricsRegistry::snapshot() const
         state_->local_manifest_repairs_total.load(
             std::memory_order_relaxed
         );
+
+    result.metadata_catalog_sync_runs_total =
+        state_->
+            metadata_catalog_sync_runs_total.load(
+                std::memory_order_relaxed
+            );
+
+    result.metadata_catalog_sync_converged_total =
+        state_->
+            metadata_catalog_sync_converged_total.load(
+                std::memory_order_relaxed
+            );
+
+    result.metadata_catalog_sync_incomplete_total =
+        state_->
+            metadata_catalog_sync_incomplete_total.load(
+                std::memory_order_relaxed
+            );
+
+    result.metadata_catalog_peers_contacted =
+        state_->
+            metadata_catalog_peers_contacted.load(
+                std::memory_order_relaxed
+            );
+
+    result.metadata_catalog_peers_succeeded =
+        state_->
+            metadata_catalog_peers_succeeded.load(
+                std::memory_order_relaxed
+            );
+
+    result.metadata_catalog_peers_failed =
+        state_->
+            metadata_catalog_peers_failed.load(
+                std::memory_order_relaxed
+            );
+
+    result.metadata_catalog_entries_observed =
+        state_->
+            metadata_catalog_entries_observed.load(
+                std::memory_order_relaxed
+            );
+
+    result.metadata_catalog_manifests_recovered =
+        state_->
+            metadata_catalog_manifests_recovered.load(
+                std::memory_order_relaxed
+            );
+
+    result.metadata_catalog_manifests_unrecovered =
+        state_->
+            metadata_catalog_manifests_unrecovered.load(
+                std::memory_order_relaxed
+            );
+
+    result.metadata_catalog_conflicts =
+        state_->
+            metadata_catalog_conflicts.load(
+                std::memory_order_relaxed
+            );
 
     {
         const std::lock_guard lock{

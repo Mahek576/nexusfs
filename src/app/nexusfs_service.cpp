@@ -2,6 +2,7 @@
 
 #include "nexusfs/cluster/peer_transport.hpp"
 #include "nexusfs/cluster/metadata_coordinator.hpp"
+#include "nexusfs/cluster/metadata_catalog_synchronizer.hpp"
 #include "nexusfs/cluster/replica_repair.hpp"
 #include "nexusfs/cluster/replica_maintenance.hpp"
 #include "nexusfs/observability/json_logger.hpp"
@@ -479,6 +480,18 @@ NexusFsService::NexusFsService(
         metadata_coordinator_ =
             std::make_shared<
                 cluster::MetadataCoordinator
+            >(
+                cluster_node,
+                std::chrono::milliseconds{
+                    3000
+                },
+                metrics_registry,
+                logger
+            );
+
+        metadata_catalog_synchronizer_ =
+            std::make_shared<
+                cluster::MetadataCatalogSynchronizer
             >(
                 cluster_node,
                 std::chrono::milliseconds{
@@ -1315,6 +1328,107 @@ ListFilesResult NexusFsService::list_files() const
         std::move(files),
         complete_manifests,
         incomplete_manifests
+    };
+}
+
+SynchronizeMetadataCatalogResult
+NexusFsService::synchronize_metadata_catalog() const
+{
+    if (!metadata_catalog_synchronizer_)
+    {
+        throw std::runtime_error(
+            "Metadata catalog synchronization requires "
+            "cluster services."
+        );
+    }
+
+    /*
+     * Synchronization may durably publish recovered manifests.
+     * The entire additive operation therefore uses the exclusive
+     * process-wide storage lock.
+     */
+    const std::unique_lock storage_lock{
+        concurrency_state_->
+            storage_mutex
+    };
+
+    storage::ManifestStore manifest_store{
+        storage_root_
+    };
+
+    const storage::ChunkStore chunk_store{
+        storage_root_
+    };
+
+    const cluster::MetadataCatalogSyncReport report =
+        metadata_catalog_synchronizer_->
+            synchronize(
+                manifest_store
+            );
+
+    std::vector<StoredFileSummary> files;
+
+    files.reserve(
+        report.synchronized_entries.size()
+    );
+
+    for (
+        const cluster::MetadataCatalogEntry& entry :
+        report.synchronized_entries
+    )
+    {
+        const LoadedManifest loaded_manifest =
+            load_canonical_manifest(
+                manifest_store,
+                entry.manifest_id
+            );
+
+        std::size_t missing_chunks = 0;
+
+        for (
+            const std::string& chunk_hash :
+            loaded_manifest.manifest
+                .chunk_hashes()
+        )
+        {
+            if (
+                !chunk_store.contains(
+                    chunk_hash
+                )
+            )
+            {
+                ++missing_chunks;
+            }
+        }
+
+        files.push_back(
+            StoredFileSummary{
+                entry.manifest_id,
+                entry.original_filename,
+                entry.file_size,
+                static_cast<std::size_t>(
+                    entry.chunk_size
+                ),
+                static_cast<std::size_t>(
+                    entry.chunk_count
+                ),
+                missing_chunks
+            }
+        );
+    }
+
+    return SynchronizeMetadataCatalogResult{
+        std::move(files),
+        report.peers_contacted,
+        report.peers_succeeded,
+        report.peers_failed,
+        report.remote_entries_observed,
+        report.unique_entries_discovered,
+        report.manifests_already_local,
+        report.manifests_recovered,
+        report.manifests_unrecovered,
+        report.conflicts_detected,
+        report.converged
     };
 }
 

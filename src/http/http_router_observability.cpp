@@ -41,6 +41,10 @@ constexpr std::string_view cluster_catalog_route{
     "/api/v1/cluster/catalog"
 };
 
+constexpr std::string_view cluster_catalog_sync_route{
+    "/api/v1/cluster/catalog/sync"
+};
+
 constexpr std::string_view cluster_chunk_prefix{
     "/api/v1/cluster/chunks/"
 };
@@ -743,6 +747,61 @@ HttpRouter::Response make_metrics_response(
                         {
                             "local_repairs",
                             snapshot.local_manifest_repairs_total
+                        },
+                        {
+                            "catalog_synchronization",
+                            {
+                                {
+                                    "runs",
+                                    snapshot
+                                        .metadata_catalog_sync_runs_total
+                                },
+                                {
+                                    "converged",
+                                    snapshot
+                                        .metadata_catalog_sync_converged_total
+                                },
+                                {
+                                    "incomplete",
+                                    snapshot
+                                        .metadata_catalog_sync_incomplete_total
+                                },
+                                {
+                                    "peers_contacted",
+                                    snapshot
+                                        .metadata_catalog_peers_contacted
+                                },
+                                {
+                                    "peers_succeeded",
+                                    snapshot
+                                        .metadata_catalog_peers_succeeded
+                                },
+                                {
+                                    "peers_failed",
+                                    snapshot
+                                        .metadata_catalog_peers_failed
+                                },
+                                {
+                                    "entries_observed",
+                                    snapshot
+                                        .metadata_catalog_entries_observed
+                                },
+                                {
+                                    "manifests_recovered",
+                                    snapshot
+                                        .metadata_catalog_manifests_recovered
+                                },
+                                {
+                                    "manifests_unrecovered",
+                                    snapshot
+                                        .metadata_catalog_manifests_unrecovered
+                                },
+                                {
+                                    "conflicts",
+                                    snapshot
+                                        .metadata_catalog_conflicts
+                                }
+                            }
                         }
                     }
                 },
@@ -1120,6 +1179,11 @@ std::string_view HttpRouter::normalized_route(
     if (target == cluster_heartbeat_route)
     {
         return cluster_heartbeat_route;
+    }
+
+    if (target == cluster_catalog_sync_route)
+    {
+        return cluster_catalog_sync_route;
     }
 
     if (target == cluster_catalog_route)

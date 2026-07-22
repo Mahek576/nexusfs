@@ -36,6 +36,10 @@ constexpr std::string_view cluster_catalog_route{
     "/api/v1/cluster/catalog"
 };
 
+constexpr std::string_view cluster_catalog_sync_route{
+    "/api/v1/cluster/catalog/sync"
+};
+
 constexpr std::string_view cluster_chunk_prefix{
     "/api/v1/cluster/chunks/"
 };
@@ -751,7 +755,9 @@ HttpRouter::route_cluster_request(
 
     if (
         target ==
-        cluster_catalog_route
+            cluster_catalog_route
+        || target ==
+            cluster_catalog_sync_route
     )
     {
         return route_cluster_catalog_request(

@@ -12,6 +12,7 @@ namespace nexusfs::cluster
 {
 
 class ClusterNodeFoundation;
+class MetadataCatalogSynchronizer;
 class MetadataCoordinator;
 class ReplicaMaintenanceCoordinator;
 class ReplicaRepairCoordinator;
@@ -116,6 +117,26 @@ struct ListFilesResult
     std::size_t incomplete_manifests;
 };
 
+struct SynchronizeMetadataCatalogResult
+{
+    std::vector<StoredFileSummary> files;
+
+    std::size_t peers_contacted;
+    std::size_t peers_succeeded;
+    std::size_t peers_failed;
+
+    std::size_t remote_entries_observed;
+    std::size_t unique_entries_discovered;
+
+    std::size_t manifests_already_local;
+    std::size_t manifests_recovered;
+    std::size_t manifests_unrecovered;
+
+    std::size_t conflicts_detected;
+
+    bool converged;
+};
+
 struct RepairReplicasResult
 {
     std::size_t manifests_scanned;
@@ -198,6 +219,9 @@ public:
 
     [[nodiscard]] ListFilesResult list_files() const;
 
+    [[nodiscard]] SynchronizeMetadataCatalogResult
+    synchronize_metadata_catalog() const;
+
     [[nodiscard]] RepairReplicasResult
     repair_replicas() const;
 
@@ -218,6 +242,10 @@ private:
     bool strict_replication_{
         true
     };
+
+    std::shared_ptr<
+        cluster::MetadataCatalogSynchronizer
+    > metadata_catalog_synchronizer_;
 
     std::shared_ptr<
         cluster::MetadataCoordinator

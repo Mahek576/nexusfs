@@ -33,6 +33,27 @@ constexpr std::string_view catalog_digest_header{
     "X-NexusFS-Catalog-Digest"
 };
 
+constexpr std::string_view cluster_catalog_route{
+    "/api/v1/cluster/catalog"
+};
+
+constexpr std::string_view cluster_catalog_sync_route{
+    "/api/v1/cluster/catalog/sync"
+};
+
+std::string_view request_target(
+    const HttpRouter::Request& request
+) noexcept
+{
+    const auto target =
+        request.target();
+
+    return std::string_view{
+        target.data(),
+        target.size()
+    };
+}
+
 bool is_configured_peer(
     const cluster::ClusterNodeFoundation& cluster_node,
     std::string_view node_id
@@ -159,6 +180,191 @@ HttpRouter::route_cluster_catalog_request(
             "peer_not_authorized",
             "The cluster catalog request did not provide "
             "an authorized peer identity.",
+            request
+        );
+    }
+
+    const std::string_view target =
+        request_target(
+            request
+        );
+
+    if (
+        target ==
+        cluster_catalog_sync_route
+    )
+    {
+        if (
+            request.method() !=
+            beast_http::verb::post
+        )
+        {
+            HttpRouter::Response response =
+                make_error_response(
+                    beast_http::status::
+                        method_not_allowed,
+                    "method_not_allowed",
+                    "The cluster catalog synchronization "
+                    "endpoint supports only POST.",
+                    request
+                );
+
+            response.set(
+                beast_http::field::allow,
+                "POST"
+            );
+
+            return response;
+        }
+
+        try
+        {
+            const app::SynchronizeMetadataCatalogResult
+                result =
+                    service_->
+                        synchronize_metadata_catalog();
+
+            nlohmann::ordered_json files =
+                nlohmann::ordered_json::array();
+
+            for (
+                const app::StoredFileSummary& file :
+                result.files
+            )
+            {
+                files.push_back(
+                    {
+                        {
+                            "manifest_id",
+                            file.manifest_id
+                        },
+                        {
+                            "original_filename",
+                            file.original_filename
+                        },
+                        {
+                            "file_size",
+                            file.file_size
+                        },
+                        {
+                            "chunk_size",
+                            file.configured_chunk_size
+                        },
+                        {
+                            "chunk_count",
+                            file.chunk_count
+                        },
+                        {
+                            "missing_chunks",
+                            file.missing_chunks
+                        }
+                    }
+                );
+            }
+
+            const nlohmann::ordered_json payload = {
+                {
+                    "peers_contacted",
+                    result.peers_contacted
+                },
+                {
+                    "peers_succeeded",
+                    result.peers_succeeded
+                },
+                {
+                    "peers_failed",
+                    result.peers_failed
+                },
+                {
+                    "remote_entries_observed",
+                    result.remote_entries_observed
+                },
+                {
+                    "unique_entries_discovered",
+                    result.unique_entries_discovered
+                },
+                {
+                    "manifests_already_local",
+                    result.manifests_already_local
+                },
+                {
+                    "manifests_recovered",
+                    result.manifests_recovered
+                },
+                {
+                    "manifests_unrecovered",
+                    result.manifests_unrecovered
+                },
+                {
+                    "conflicts_detected",
+                    result.conflicts_detected
+                },
+                {
+                    "converged",
+                    result.converged
+                },
+                {
+                    "files",
+                    std::move(files)
+                }
+            };
+
+            HttpRouter::Response response{
+                result.converged
+                    ? beast_http::status::ok
+                    : beast_http::status::multi_status,
+                request.version()
+            };
+
+            response.set(
+                beast_http::field::server,
+                "NexusFS"
+            );
+
+            response.set(
+                beast_http::field::content_type,
+                "application/json"
+            );
+
+            response.set(
+                beast_http::field::cache_control,
+                "no-store"
+            );
+
+            response.keep_alive(
+                request.keep_alive()
+            );
+
+            response.body() =
+                payload.dump();
+
+            response.prepare_payload();
+
+            return response;
+        }
+        catch (const std::exception&)
+        {
+            return make_error_response(
+                beast_http::status::
+                    internal_server_error,
+                "catalog_synchronization_failed",
+                "The cluster metadata catalog could not "
+                "be synchronized.",
+                request
+            );
+        }
+    }
+
+    if (
+        target !=
+        cluster_catalog_route
+    )
+    {
+        return make_error_response(
+            beast_http::status::not_found,
+            "catalog_route_not_found",
+            "The requested cluster catalog route "
+            "does not exist.",
             request
         );
     }
