@@ -125,6 +125,11 @@ private:
         const Request& request
     ) const;
 
+    [[nodiscard]] Response
+    route_cluster_rebalance_request(
+        const Request& request
+    ) const;
+
     void record_operation_metrics(
         const Request& request,
         const Response& response

@@ -49,6 +49,10 @@ constexpr std::string_view cluster_members_leave_route{
     "/api/v1/cluster/members/leave"
 };
 
+constexpr std::string_view cluster_rebalance_route{
+    "/api/v1/cluster/rebalance"
+};
+
 constexpr std::string_view cluster_catalog_route{
     "/api/v1/cluster/catalog"
 };
@@ -702,6 +706,57 @@ HttpRouter::Response make_metrics_response(
                     }
                 },
                 {
+                    "rebalancing",
+                    {
+                        {
+                            "runs",
+                            snapshot.rebalancing_runs_total
+                        },
+                        {
+                            "completed",
+                            snapshot.rebalancing_completed_total
+                        },
+                        {
+                            "replayed",
+                            snapshot.rebalancing_replayed_total
+                        },
+                        {
+                            "stale_epoch",
+                            snapshot.rebalancing_stale_epoch_total
+                        },
+                        {
+                            "idempotency_conflicts",
+                            snapshot
+                                .rebalancing_idempotency_conflicts_total
+                        },
+                        {
+                            "chunks_scanned",
+                            snapshot.rebalancing_chunks_scanned
+                        },
+                        {
+                            "targets_planned",
+                            snapshot.rebalancing_targets_planned
+                        },
+                        {
+                            "replicas_observed",
+                            snapshot.rebalancing_replicas_observed
+                        },
+                        {
+                            "replicas_created",
+                            snapshot.rebalancing_replicas_created
+                        },
+                        {
+                            "peer_failures",
+                            snapshot.rebalancing_peer_failures
+                        },
+                        {
+                            "under_replicated_chunks",
+                            snapshot
+                                .rebalancing_under_replicated_chunks
+                        }
+                    }
+                },
+                {
                     "heartbeats",
                     {
                         {
@@ -1236,6 +1291,11 @@ std::string_view HttpRouter::normalized_route(
     if (target == cluster_members_leave_route)
     {
         return cluster_members_leave_route;
+    }
+
+    if (target == cluster_rebalance_route)
+    {
+        return cluster_rebalance_route;
     }
 
     if (target == cluster_catalog_sync_route)

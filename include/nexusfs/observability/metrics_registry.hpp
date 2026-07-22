@@ -131,6 +131,19 @@ struct MetricsSnapshot
 
     std::uint64_t membership_epoch_conflicts_total{0};
 
+    std::uint64_t rebalancing_runs_total{0};
+    std::uint64_t rebalancing_completed_total{0};
+    std::uint64_t rebalancing_replayed_total{0};
+    std::uint64_t rebalancing_stale_epoch_total{0};
+    std::uint64_t rebalancing_idempotency_conflicts_total{0};
+
+    std::uint64_t rebalancing_chunks_scanned{0};
+    std::uint64_t rebalancing_targets_planned{0};
+    std::uint64_t rebalancing_replicas_observed{0};
+    std::uint64_t rebalancing_replicas_created{0};
+    std::uint64_t rebalancing_peer_failures{0};
+    std::uint64_t rebalancing_under_replicated_chunks{0};
+
     std::vector<NamedCounter> requests_by_method;
     std::vector<HttpRouteCounter> requests_by_route;
     std::vector<HttpStatusCounter> responses_by_status;
@@ -332,6 +345,27 @@ public:
         bool applied,
         bool epoch_conflict
     ) noexcept;
+
+    /*
+     * Records one deterministic placement-rebalancing request.
+     */
+    void record_rebalance_result(
+        std::uint64_t chunks_scanned,
+        std::uint64_t targets_planned,
+        std::uint64_t replicas_observed,
+        std::uint64_t replicas_created,
+        std::uint64_t peer_failures,
+        std::uint64_t under_replicated_chunks,
+        bool completed,
+        bool replayed,
+        bool stale_epoch
+    ) noexcept;
+
+    /*
+     * Records reuse of an operation ID with another request.
+     */
+    void record_rebalance_idempotency_conflict()
+        noexcept;
 
     /*
      * Produces a self-consistent best-effort metrics snapshot.

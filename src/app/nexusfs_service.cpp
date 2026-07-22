@@ -3,6 +3,7 @@
 #include "nexusfs/cluster/peer_transport.hpp"
 #include "nexusfs/cluster/metadata_coordinator.hpp"
 #include "nexusfs/cluster/metadata_catalog_synchronizer.hpp"
+#include "nexusfs/cluster/placement_rebalancer.hpp"
 #include "nexusfs/cluster/replica_repair.hpp"
 #include "nexusfs/cluster/replica_maintenance.hpp"
 #include "nexusfs/observability/json_logger.hpp"
@@ -516,6 +517,19 @@ NexusFsService::NexusFsService(
         replica_maintenance_coordinator_ =
             std::make_shared<
                 cluster::ReplicaMaintenanceCoordinator
+            >(
+                cluster_node,
+                replication_factor_,
+                std::chrono::milliseconds{
+                    3000
+                },
+                metrics_registry,
+                logger
+            );
+
+        placement_rebalancer_ =
+            std::make_shared<
+                cluster::PlacementRebalancer
             >(
                 cluster_node,
                 replication_factor_,
@@ -1429,6 +1443,102 @@ NexusFsService::synchronize_metadata_catalog() const
         report.manifests_unrecovered,
         report.conflicts_detected,
         report.converged
+    };
+}
+
+RebalanceClusterResult
+NexusFsService::rebalance_cluster(
+    std::string operation_id,
+    std::uint64_t expected_membership_epoch
+) const
+{
+    if (!placement_rebalancer_)
+    {
+        throw std::runtime_error(
+            "Cluster rebalancing requires cluster services."
+        );
+    }
+
+    const std::unique_lock storage_lock{
+        concurrency_state_->
+            storage_mutex
+    };
+
+    storage::ChunkStore chunk_store{
+        storage_root_
+    };
+
+    const storage::ManifestStore manifest_store{
+        storage_root_
+    };
+
+    const std::vector<std::string>
+        manifest_ids =
+            manifest_store.list_manifest_ids();
+
+    std::unordered_set<std::string>
+        unique_chunk_hashes;
+
+    for (
+        const std::string& manifest_id :
+        manifest_ids
+    )
+    {
+        const LoadedManifest loaded_manifest =
+            load_canonical_manifest(
+                manifest_store,
+                manifest_id
+            );
+
+        for (
+            const std::string& chunk_hash :
+            loaded_manifest.manifest
+                .chunk_hashes()
+        )
+        {
+            unique_chunk_hashes.insert(
+                chunk_hash
+            );
+        }
+    }
+
+    const std::vector<std::string> chunk_hashes{
+        unique_chunk_hashes.begin(),
+        unique_chunk_hashes.end()
+    };
+
+    const cluster::PlacementRebalanceReport report =
+        placement_rebalancer_->
+            rebalance(
+                chunk_hashes,
+                chunk_store,
+                std::move(operation_id),
+                expected_membership_epoch
+            );
+
+    return RebalanceClusterResult{
+        std::string{
+            cluster::rebalance_status_name(
+                report.status
+            )
+        },
+        report.operation_id,
+        report.request_digest,
+        report.expected_membership_epoch,
+        report.observed_membership_epoch,
+        report.replication_factor,
+        static_cast<std::uint64_t>(
+            manifest_ids.size()
+        ),
+        report.chunks_scanned,
+        report.targets_planned,
+        report.replicas_observed,
+        report.replicas_created,
+        report.peer_failures,
+        report.under_replicated_chunks,
+        report.converged,
+        report.replayed,
+        report.applied
     };
 }
 
