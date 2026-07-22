@@ -5,6 +5,7 @@
 #include "nexusfs/cluster/cluster_node_foundation.hpp"
 #include "nexusfs/observability/json_logger.hpp"
 #include "nexusfs/observability/metrics_registry.hpp"
+#include "nexusfs/security/request_security.hpp"
 
 #include <boost/beast/http.hpp>
 
@@ -106,6 +107,11 @@ private:
     ) const;
 
     [[nodiscard]] Response
+    route_admin_request(
+        const Request& request
+    ) const;
+
+    [[nodiscard]] Response
     route_cluster_request(
         const Request& request
     ) const;
@@ -148,6 +154,14 @@ private:
     std::shared_ptr<
         cluster::ClusterNodeFoundation
     > cluster_node_;
+
+    std::shared_ptr<
+        security::RequestSecurity
+    > request_security_{
+        std::make_shared<
+            security::RequestSecurity
+        >()
+    };
 
     std::shared_ptr<
         observability::MetricsRegistry

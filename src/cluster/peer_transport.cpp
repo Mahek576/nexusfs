@@ -2,6 +2,7 @@
 
 #include "nexusfs/observability/json_logger.hpp"
 #include "nexusfs/observability/metrics_registry.hpp"
+#include "nexusfs/security/request_security.hpp"
 #include "nexusfs/storage/sha256_hasher.hpp"
 
 #include <boost/asio/error.hpp>
@@ -229,6 +230,18 @@ perform_request(
         std::move(body);
 
     request.prepare_payload();
+
+    security::RequestSecurity request_security;
+
+    request_security.sign_peer_request(
+        request,
+        cluster_node
+            .configuration()
+            .cluster_id,
+        cluster_node
+            .identity()
+            .node_id
+    );
 
     stream.expires_after(
         timeout
