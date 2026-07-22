@@ -2,6 +2,7 @@
 #define NEXUSFS_CLUSTER_PEER_TRANSPORT_HPP
 
 #include "nexusfs/cluster/cluster_node_foundation.hpp"
+#include "nexusfs/cluster/metadata_catalog.hpp"
 
 #include <chrono>
 #include <cstddef>
@@ -74,6 +75,11 @@ public:
     );
 
     void send_heartbeat(
+        const PeerDefinition& peer
+    );
+
+    [[nodiscard]] MetadataCatalogSnapshot
+    load_catalog(
         const PeerDefinition& peer
     );
 

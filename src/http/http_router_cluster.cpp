@@ -32,6 +32,10 @@ constexpr std::string_view heartbeat_route{
     "/api/v1/cluster/heartbeat"
 };
 
+constexpr std::string_view cluster_catalog_route{
+    "/api/v1/cluster/catalog"
+};
+
 constexpr std::string_view cluster_chunk_prefix{
     "/api/v1/cluster/chunks/"
 };
@@ -744,6 +748,16 @@ HttpRouter::route_cluster_request(
         request_target(
             request
         );
+
+    if (
+        target ==
+        cluster_catalog_route
+    )
+    {
+        return route_cluster_catalog_request(
+            request
+        );
+    }
 
     if (
         target.starts_with(
