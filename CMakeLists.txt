@@ -24,6 +24,7 @@ add_library(
         src/app/nexusfs_service.cpp
         src/cli/command_line.cpp
         src/cluster/cluster_node_foundation.cpp
+        src/cluster/metadata_ownership.cpp
         src/cluster/peer_transport.cpp
         src/cluster/replica_repair.cpp
         src/cluster/replica_maintenance.cpp
@@ -99,6 +100,46 @@ target_link_libraries(
 )
 
 if(BUILD_TESTING)
+    add_executable(
+        nexusfs_metadata_ownership_tests
+        tests/test_metadata_ownership.cpp
+    )
+
+    target_link_libraries(
+        nexusfs_metadata_ownership_tests
+        PRIVATE
+            nexusfs_core
+            Threads::Threads
+    )
+
+    if(MSVC)
+        target_compile_options(
+            nexusfs_metadata_ownership_tests
+            PRIVATE
+                /W4
+                /permissive-
+        )
+    else()
+        target_compile_options(
+            nexusfs_metadata_ownership_tests
+            PRIVATE
+                -Wall
+                -Wextra
+                -Wpedantic
+        )
+    endif()
+
+    add_test(
+        NAME nexusfs_metadata_ownership_tests
+        COMMAND nexusfs_metadata_ownership_tests
+    )
+
+    set_tests_properties(
+        nexusfs_metadata_ownership_tests
+        PROPERTIES
+            TIMEOUT 30
+    )
+
     add_executable(
         nexusfs_replica_maintenance_scheduler_tests
         tests/test_replica_maintenance_scheduler.cpp
