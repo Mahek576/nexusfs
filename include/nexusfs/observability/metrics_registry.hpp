@@ -83,6 +83,23 @@ struct MetricsSnapshot
     std::uint64_t replication_remote_acknowledgements{0};
     std::uint64_t replication_remote_failures{0};
 
+    std::uint64_t remote_chunk_reads_total{0};
+    std::uint64_t remote_chunk_reads_succeeded{0};
+    std::uint64_t remote_chunk_reads_failed{0};
+    std::uint64_t local_chunk_repairs_total{0};
+
+    std::uint64_t replica_maintenance_runs_total{0};
+    std::uint64_t replica_maintenance_chunks_scanned{0};
+    std::uint64_t replica_maintenance_local_chunks_recovered{0};
+    std::uint64_t replica_maintenance_remote_replicas_observed{0};
+    std::uint64_t replica_maintenance_remote_replicas_created{0};
+    std::uint64_t replica_maintenance_peer_failures{0};
+    std::uint64_t replica_maintenance_under_replicated_chunks{0};
+
+    std::uint64_t replica_maintenance_scheduler_starts_total{0};
+    std::uint64_t replica_maintenance_scheduler_stops_total{0};
+    std::uint64_t replica_maintenance_scheduler_failures_total{0};
+
     std::vector<NamedCounter> requests_by_method;
     std::vector<HttpRouteCounter> requests_by_route;
     std::vector<HttpStatusCounter> responses_by_status;
@@ -207,6 +224,42 @@ public:
         std::uint64_t remote_failures,
         bool satisfied
     ) noexcept;
+
+    /*
+     * Records one remote chunk-read attempt.
+     */
+    void record_remote_chunk_read(
+        bool succeeded
+    ) noexcept;
+
+    /*
+     * Records one verified local chunk repair.
+     */
+    void record_local_chunk_repair() noexcept;
+
+    /*
+     * Records one completed proactive replica-maintenance sweep.
+     */
+    void record_replica_maintenance(
+        std::uint64_t chunks_scanned,
+        std::uint64_t local_chunks_recovered,
+        std::uint64_t remote_replicas_observed,
+        std::uint64_t remote_replicas_created,
+        std::uint64_t peer_failures,
+        std::uint64_t under_replicated_chunks
+    ) noexcept;
+
+    /*
+     * Records replica-maintenance scheduler lifecycle activity.
+     */
+    void record_replica_maintenance_scheduler_started()
+        noexcept;
+
+    void record_replica_maintenance_scheduler_stopped()
+        noexcept;
+
+    void record_replica_maintenance_scheduler_failure()
+        noexcept;
 
     /*
      * Produces a self-consistent best-effort metrics snapshot.

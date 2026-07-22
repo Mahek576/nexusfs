@@ -1,6 +1,7 @@
 #include "nexusfs/app/nexusfs_service.hpp"
 #include "nexusfs/cluster/cluster_node_foundation.hpp"
 #include "nexusfs/cluster/heartbeat_scheduler.hpp"
+#include "nexusfs/cluster/replica_maintenance_scheduler.hpp"
 #include "nexusfs/daemon/daemon_configuration.hpp"
 #include "nexusfs/http/http_router.hpp"
 #include "nexusfs/http/http_server.hpp"
@@ -12,6 +13,7 @@
 #include <boost/asio/signal_set.hpp>
 #include <boost/system/error_code.hpp>
 
+#include <chrono>
 #include <csignal>
 #include <cstddef>
 #include <cstdint>
@@ -273,6 +275,19 @@ int main(
                 logger
             );
 
+        nexusfs::cluster::
+            ReplicaMaintenanceScheduler
+                replica_maintenance_scheduler{
+                    service,
+                    metrics_registry,
+                    logger,
+                    std::chrono::milliseconds{
+                        cluster_node
+                            ->configuration()
+                            .replica_maintenance_interval_ms
+                    }
+                };
+
         const nexusfs::http::HttpRouter router{
             service,
             metrics_registry,
@@ -352,6 +367,7 @@ int main(
         );
 
         heartbeat_scheduler.start();
+        replica_maintenance_scheduler.start();
 
         try
         {
@@ -360,6 +376,7 @@ int main(
         catch (...)
         {
             server.stop();
+            replica_maintenance_scheduler.stop();
             heartbeat_scheduler.stop();
 
             stop_signal_context(
@@ -378,6 +395,7 @@ int main(
             throw;
         }
 
+        replica_maintenance_scheduler.stop();
         heartbeat_scheduler.stop();
 
         stop_signal_context(

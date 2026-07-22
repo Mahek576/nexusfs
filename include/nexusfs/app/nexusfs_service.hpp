@@ -12,6 +12,8 @@ namespace nexusfs::cluster
 {
 
 class ClusterNodeFoundation;
+class ReplicaMaintenanceCoordinator;
+class ReplicaRepairCoordinator;
 class ReplicationCoordinator;
 
 }
@@ -109,6 +111,22 @@ struct ListFilesResult
     std::size_t incomplete_manifests;
 };
 
+struct RepairReplicasResult
+{
+    std::size_t manifests_scanned;
+    std::size_t unique_chunks_scanned;
+
+    std::size_t local_chunks_recovered;
+
+    std::size_t remote_replicas_observed;
+    std::size_t remote_replicas_created;
+
+    std::size_t peer_failures;
+    std::size_t under_replicated_chunks;
+
+    bool fully_repaired;
+};
+
 /*
  * Internal process-wide synchronization state.
  *
@@ -175,6 +193,9 @@ public:
 
     [[nodiscard]] ListFilesResult list_files() const;
 
+    [[nodiscard]] RepairReplicasResult
+    repair_replicas() const;
+
     [[nodiscard]] const std::filesystem::path&
     storage_root() const noexcept;
 
@@ -196,6 +217,18 @@ private:
     std::shared_ptr<
         cluster::ReplicationCoordinator
     > replication_coordinator_;
+
+    std::shared_ptr<
+        cluster::ReplicaRepairCoordinator
+    > replica_repair_coordinator_;
+
+    std::shared_ptr<
+        cluster::ReplicaMaintenanceCoordinator
+    > replica_maintenance_coordinator_;
+
+    void repair_missing_manifest_chunks(
+        const std::string& manifest_id
+    ) const;
 
     /*
      * shared_ptr deliberately preserves the original copyability of

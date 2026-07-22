@@ -25,6 +25,9 @@ add_library(
         src/cli/command_line.cpp
         src/cluster/cluster_node_foundation.cpp
         src/cluster/peer_transport.cpp
+        src/cluster/replica_repair.cpp
+        src/cluster/replica_maintenance.cpp
+        src/cluster/replica_maintenance_scheduler.cpp
         src/cluster/heartbeat_scheduler.cpp
         src/daemon/daemon_configuration.cpp
         src/http/http_router.cpp
@@ -96,6 +99,129 @@ target_link_libraries(
 )
 
 if(BUILD_TESTING)
+    add_executable(
+        nexusfs_replica_maintenance_scheduler_tests
+        tests/test_replica_maintenance_scheduler.cpp
+    )
+
+    target_link_libraries(
+        nexusfs_replica_maintenance_scheduler_tests
+        PRIVATE
+            nexusfs_core
+            nlohmann_json::nlohmann_json
+            Threads::Threads
+    )
+
+    if(MSVC)
+        target_compile_options(
+            nexusfs_replica_maintenance_scheduler_tests
+            PRIVATE
+                /W4
+                /permissive-
+        )
+    else()
+        target_compile_options(
+            nexusfs_replica_maintenance_scheduler_tests
+            PRIVATE
+                -Wall
+                -Wextra
+                -Wpedantic
+        )
+    endif()
+
+    add_test(
+        NAME nexusfs_replica_maintenance_scheduler_tests
+        COMMAND nexusfs_replica_maintenance_scheduler_tests
+    )
+
+    set_tests_properties(
+        nexusfs_replica_maintenance_scheduler_tests
+        PROPERTIES
+            TIMEOUT 60
+    )
+
+    add_executable(
+        nexusfs_replica_maintenance_tests
+        tests/test_replica_maintenance.cpp
+    )
+
+    target_link_libraries(
+        nexusfs_replica_maintenance_tests
+        PRIVATE
+            nexusfs_core
+            nlohmann_json::nlohmann_json
+            Threads::Threads
+    )
+
+    if(MSVC)
+        target_compile_options(
+            nexusfs_replica_maintenance_tests
+            PRIVATE
+                /W4
+                /permissive-
+        )
+    else()
+        target_compile_options(
+            nexusfs_replica_maintenance_tests
+            PRIVATE
+                -Wall
+                -Wextra
+                -Wpedantic
+        )
+    endif()
+
+    add_test(
+        NAME nexusfs_replica_maintenance_tests
+        COMMAND nexusfs_replica_maintenance_tests
+    )
+
+    set_tests_properties(
+        nexusfs_replica_maintenance_tests
+        PROPERTIES
+            TIMEOUT 60
+    )
+
+    add_executable(
+        nexusfs_replica_repair_tests
+        tests/test_replica_repair.cpp
+    )
+
+    target_link_libraries(
+        nexusfs_replica_repair_tests
+        PRIVATE
+            nexusfs_core
+            nlohmann_json::nlohmann_json
+            Threads::Threads
+    )
+
+    if(MSVC)
+        target_compile_options(
+            nexusfs_replica_repair_tests
+            PRIVATE
+                /W4
+                /permissive-
+        )
+    else()
+        target_compile_options(
+            nexusfs_replica_repair_tests
+            PRIVATE
+                -Wall
+                -Wextra
+                -Wpedantic
+        )
+    endif()
+
+    add_test(
+        NAME nexusfs_replica_repair_tests
+        COMMAND nexusfs_replica_repair_tests
+    )
+
+    set_tests_properties(
+        nexusfs_replica_repair_tests
+        PROPERTIES
+            TIMEOUT 45
+    )
+
     add_executable(
         nexusfs_cluster_runtime_tests
         tests/test_cluster_runtime.cpp

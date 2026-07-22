@@ -568,6 +568,17 @@ void validate_configuration(
         );
     }
 
+    if (
+        configuration.replica_maintenance_interval_ms
+        < 100
+    )
+    {
+        throw std::invalid_argument(
+            "Replica-maintenance interval must be "
+            "at least 100 milliseconds."
+        );
+    }
+
     std::unordered_set<std::string>
         node_ids;
 
@@ -704,6 +715,11 @@ ClusterConfiguration load_or_create_configuration(
                 candidate.strict_replication
             },
             {
+                "replica_maintenance_interval_ms",
+                candidate
+                    .replica_maintenance_interval_ms
+            },
+            {
                 "peers",
                 nlohmann::ordered_json::array()
             }
@@ -804,6 +820,14 @@ ClusterConfiguration load_or_create_configuration(
         payload.value(
             "strict_replication",
             true
+        );
+
+    configuration.replica_maintenance_interval_ms =
+        payload.value(
+            "replica_maintenance_interval_ms",
+            static_cast<std::uint64_t>(
+                30000
+            )
         );
 
     const nlohmann::json& peers =

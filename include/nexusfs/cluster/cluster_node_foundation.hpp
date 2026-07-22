@@ -57,6 +57,13 @@ struct ClusterConfiguration
     };
 
     std::vector<PeerDefinition> peers;
+
+    /*
+     * Interval between proactive replica-maintenance sweeps.
+     */
+    std::uint64_t replica_maintenance_interval_ms{
+        30000
+    };
 };
 
 enum class PeerHealthState
