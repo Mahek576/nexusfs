@@ -254,6 +254,10 @@ struct MetricsRegistry::State
     Counter replica_maintenance_peer_failures{0};
     Counter replica_maintenance_under_replicated_chunks{0};
 
+    Counter replica_maintenance_scheduler_starts_total{0};
+    Counter replica_maintenance_scheduler_stops_total{0};
+    Counter replica_maintenance_scheduler_failures_total{0};
+
     mutable std::mutex dimensions_mutex;
 
     std::unordered_map<
@@ -699,6 +703,36 @@ void MetricsRegistry::record_replica_maintenance(
     );
 }
 
+void MetricsRegistry::
+record_replica_maintenance_scheduler_started()
+    noexcept
+{
+    increment_counter(
+        state_->
+            replica_maintenance_scheduler_starts_total
+    );
+}
+
+void MetricsRegistry::
+record_replica_maintenance_scheduler_stopped()
+    noexcept
+{
+    increment_counter(
+        state_->
+            replica_maintenance_scheduler_stops_total
+    );
+}
+
+void MetricsRegistry::
+record_replica_maintenance_scheduler_failure()
+    noexcept
+{
+    increment_counter(
+        state_->
+            replica_maintenance_scheduler_failures_total
+    );
+}
+
 MetricsSnapshot MetricsRegistry::snapshot() const
 {
     MetricsSnapshot result;
@@ -988,6 +1022,24 @@ MetricsSnapshot MetricsRegistry::snapshot() const
     result.replica_maintenance_under_replicated_chunks =
         state_->
             replica_maintenance_under_replicated_chunks.load(
+                std::memory_order_relaxed
+            );
+
+    result.replica_maintenance_scheduler_starts_total =
+        state_->
+            replica_maintenance_scheduler_starts_total.load(
+                std::memory_order_relaxed
+            );
+
+    result.replica_maintenance_scheduler_stops_total =
+        state_->
+            replica_maintenance_scheduler_stops_total.load(
+                std::memory_order_relaxed
+            );
+
+    result.replica_maintenance_scheduler_failures_total =
+        state_->
+            replica_maintenance_scheduler_failures_total.load(
                 std::memory_order_relaxed
             );
 

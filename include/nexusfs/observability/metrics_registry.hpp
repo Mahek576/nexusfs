@@ -96,6 +96,10 @@ struct MetricsSnapshot
     std::uint64_t replica_maintenance_peer_failures{0};
     std::uint64_t replica_maintenance_under_replicated_chunks{0};
 
+    std::uint64_t replica_maintenance_scheduler_starts_total{0};
+    std::uint64_t replica_maintenance_scheduler_stops_total{0};
+    std::uint64_t replica_maintenance_scheduler_failures_total{0};
+
     std::vector<NamedCounter> requests_by_method;
     std::vector<HttpRouteCounter> requests_by_route;
     std::vector<HttpStatusCounter> responses_by_status;
@@ -244,6 +248,18 @@ public:
         std::uint64_t peer_failures,
         std::uint64_t under_replicated_chunks
     ) noexcept;
+
+    /*
+     * Records replica-maintenance scheduler lifecycle activity.
+     */
+    void record_replica_maintenance_scheduler_started()
+        noexcept;
+
+    void record_replica_maintenance_scheduler_stopped()
+        noexcept;
+
+    void record_replica_maintenance_scheduler_failure()
+        noexcept;
 
     /*
      * Produces a self-consistent best-effort metrics snapshot.

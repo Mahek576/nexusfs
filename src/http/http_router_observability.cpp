@@ -747,6 +747,26 @@ HttpRouter::Response make_metrics_response(
                             "under_replicated_chunks",
                             snapshot
                                 .replica_maintenance_under_replicated_chunks
+                        },
+                        {
+                            "scheduler",
+                            {
+                                {
+                                    "starts",
+                                    snapshot
+                                        .replica_maintenance_scheduler_starts_total
+                                },
+                                {
+                                    "stops",
+                                    snapshot
+                                        .replica_maintenance_scheduler_stops_total
+                                },
+                                {
+                                    "sweep_failures",
+                                    snapshot
+                                        .replica_maintenance_scheduler_failures_total
+                                }
+                            }
                         }
                     }
                 }
