@@ -1,0 +1,61 @@
+name: NexusFS Dashboard CI
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "dashboard/**"
+      - ".github/workflows/dashboard-ci.yml"
+
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "dashboard/**"
+      - ".github/workflows/dashboard-ci.yml"
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nexusfs-dashboard-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  dashboard:
+    name: Dashboard lint, typecheck and build
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: dashboard
+
+    env:
+      NEXUSFS_API_BASE_URL: http://127.0.0.1:8080
+      NEXUSFS_ADMIN_TOKEN: ci-placeholder-admin-token
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: dashboard/package-lock.json
+
+      - name: Install dashboard dependencies
+        run: npm ci
+
+      - name: Lint dashboard
+        run: npm run lint
+
+      - name: Type-check dashboard
+        run: npm run typecheck
+
+      - name: Build dashboard
+        run: npm run build
