@@ -24,6 +24,10 @@ struct PeerDefinition
     std::string node_id;
     std::string address;
     std::uint16_t port{0};
+
+    [[nodiscard]] bool operator==(
+        const PeerDefinition&
+    ) const = default;
 };
 
 struct ClusterConfiguration
@@ -56,11 +60,13 @@ struct ClusterConfiguration
         true
     };
 
+    /*
+     * cluster.json provides the bootstrap peer set. After the
+     * first membership snapshot is created, persisted membership
+     * snapshots become authoritative.
+     */
     std::vector<PeerDefinition> peers;
 
-    /*
-     * Interval between proactive replica-maintenance sweeps.
-     */
     std::uint64_t replica_maintenance_interval_ms{
         30000
     };
@@ -79,9 +85,37 @@ peer_health_state_name(
     PeerHealthState state
 ) noexcept;
 
+enum class MembershipChangeStatus
+{
+    added,
+    updated,
+    unchanged,
+    removed,
+    not_found,
+    epoch_mismatch
+};
+
+[[nodiscard]] std::string_view
+membership_change_status_name(
+    MembershipChangeStatus status
+) noexcept;
+
+struct MembershipChangeResult
+{
+    MembershipChangeStatus status{
+        MembershipChangeStatus::unchanged
+    };
+
+    std::uint64_t epoch{0};
+    std::size_t member_count{0};
+
+    bool applied{false};
+};
+
 struct PeerHealthSnapshot
 {
     PeerDefinition peer;
+
     PeerHealthState state{
         PeerHealthState::unknown
     };
@@ -89,6 +123,7 @@ struct PeerHealthSnapshot
     std::uint64_t successful_heartbeats{0};
     std::uint64_t consecutive_failures{0};
     std::uint64_t last_seen_unix_ms{0};
+
     std::string last_error;
 };
 
@@ -105,6 +140,9 @@ struct ClusterSnapshot
 {
     NodeIdentity local_identity;
     ClusterConfiguration configuration;
+
+    std::uint64_t membership_epoch{0};
+
     std::vector<PeerHealthSnapshot> peers;
 
     std::uint64_t healthy_peers{0};
@@ -114,15 +152,19 @@ struct ClusterSnapshot
 };
 
 /*
- * Persistent local node identity plus thread-safe peer health state.
+ * Persistent local node identity, immutable configuration snapshots,
+ * durable dynamic membership and thread-safe peer health state.
  *
  * Files:
  *
  *   <storage-root>/cluster/node_identity.json
  *   <storage-root>/cluster/cluster.json
+ *   <storage-root>/cluster/membership/epoch-*.json
  *
- * Both files are published through the durable no-replace storage
- * primitive. Existing identity is never silently regenerated.
+ * Membership snapshots are immutable and monotonically versioned.
+ * Existing configuration references remain valid for the lifetime of
+ * the foundation, preventing iterator invalidation during live joins
+ * and leaves.
  */
 class ClusterNodeFoundation final
 {
@@ -153,6 +195,28 @@ public:
 
     [[nodiscard]] const ClusterConfiguration&
     configuration() const noexcept;
+
+    [[nodiscard]] std::vector<PeerDefinition>
+    peer_definitions() const;
+
+    [[nodiscard]] bool is_known_peer(
+        std::string_view peer_node_id
+    ) const;
+
+    [[nodiscard]] std::uint64_t
+    membership_epoch() const;
+
+    [[nodiscard]] MembershipChangeResult
+    upsert_peer(
+        const PeerDefinition& peer,
+        std::uint64_t expected_epoch
+    );
+
+    [[nodiscard]] MembershipChangeResult
+    remove_peer(
+        std::string_view peer_node_id,
+        std::uint64_t expected_epoch
+    );
 
     [[nodiscard]] HeartbeatMessage
     local_heartbeat() const;

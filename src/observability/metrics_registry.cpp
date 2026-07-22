@@ -281,6 +281,14 @@ struct MetricsRegistry::State
     Counter metadata_catalog_manifests_unrecovered{0};
     Counter metadata_catalog_conflicts{0};
 
+    Counter membership_join_requests_total{0};
+    Counter membership_join_applied_total{0};
+
+    Counter membership_leave_requests_total{0};
+    Counter membership_leave_applied_total{0};
+
+    Counter membership_epoch_conflicts_total{0};
+
     mutable std::mutex dimensions_mutex;
 
     std::unordered_map<
@@ -879,6 +887,47 @@ void MetricsRegistry::record_metadata_catalog_sync(
     );
 }
 
+void MetricsRegistry::record_membership_change(
+    bool join_request,
+    bool applied,
+    bool epoch_conflict
+) noexcept
+{
+    if (join_request)
+    {
+        increment_counter(
+            state_->membership_join_requests_total
+        );
+
+        if (applied)
+        {
+            increment_counter(
+                state_->membership_join_applied_total
+            );
+        }
+    }
+    else
+    {
+        increment_counter(
+            state_->membership_leave_requests_total
+        );
+
+        if (applied)
+        {
+            increment_counter(
+                state_->membership_leave_applied_total
+            );
+        }
+    }
+
+    if (epoch_conflict)
+    {
+        increment_counter(
+            state_->membership_epoch_conflicts_total
+        );
+    }
+}
+
 MetricsSnapshot MetricsRegistry::snapshot() const
 {
     MetricsSnapshot result;
@@ -1283,6 +1332,36 @@ MetricsSnapshot MetricsRegistry::snapshot() const
     result.metadata_catalog_conflicts =
         state_->
             metadata_catalog_conflicts.load(
+                std::memory_order_relaxed
+            );
+
+    result.membership_join_requests_total =
+        state_->
+            membership_join_requests_total.load(
+                std::memory_order_relaxed
+            );
+
+    result.membership_join_applied_total =
+        state_->
+            membership_join_applied_total.load(
+                std::memory_order_relaxed
+            );
+
+    result.membership_leave_requests_total =
+        state_->
+            membership_leave_requests_total.load(
+                std::memory_order_relaxed
+            );
+
+    result.membership_leave_applied_total =
+        state_->
+            membership_leave_applied_total.load(
+                std::memory_order_relaxed
+            );
+
+    result.membership_epoch_conflicts_total =
+        state_->
+            membership_epoch_conflicts_total.load(
                 std::memory_order_relaxed
             );
 

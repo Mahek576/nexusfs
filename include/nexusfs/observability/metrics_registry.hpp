@@ -123,6 +123,14 @@ struct MetricsSnapshot
     std::uint64_t metadata_catalog_manifests_unrecovered{0};
     std::uint64_t metadata_catalog_conflicts{0};
 
+    std::uint64_t membership_join_requests_total{0};
+    std::uint64_t membership_join_applied_total{0};
+
+    std::uint64_t membership_leave_requests_total{0};
+    std::uint64_t membership_leave_applied_total{0};
+
+    std::uint64_t membership_epoch_conflicts_total{0};
+
     std::vector<NamedCounter> requests_by_method;
     std::vector<HttpRouteCounter> requests_by_route;
     std::vector<HttpStatusCounter> responses_by_status;
@@ -314,6 +322,15 @@ public:
         std::uint64_t manifests_unrecovered,
         std::uint64_t conflicts,
         bool converged
+    ) noexcept;
+
+    /*
+     * Records one dynamic-membership control request.
+     */
+    void record_membership_change(
+        bool join_request,
+        bool applied,
+        bool epoch_conflict
     ) noexcept;
 
     /*

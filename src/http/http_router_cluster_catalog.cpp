@@ -59,21 +59,8 @@ bool is_configured_peer(
     std::string_view node_id
 )
 {
-    return std::any_of(
-        cluster_node
-            .configuration()
-            .peers
-            .begin(),
-        cluster_node
-            .configuration()
-            .peers
-            .end(),
-        [node_id](
-            const cluster::PeerDefinition& peer
-        )
-        {
-            return peer.node_id == node_id;
-        }
+    return cluster_node.is_known_peer(
+        node_id
     );
 }
 

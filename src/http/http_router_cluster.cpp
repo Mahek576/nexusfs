@@ -32,6 +32,10 @@ constexpr std::string_view heartbeat_route{
     "/api/v1/cluster/heartbeat"
 };
 
+constexpr std::string_view cluster_members_prefix{
+    "/api/v1/cluster/members"
+};
+
 constexpr std::string_view cluster_catalog_route{
     "/api/v1/cluster/catalog"
 };
@@ -287,21 +291,8 @@ bool is_configured_peer(
     std::string_view node_id
 )
 {
-    return std::any_of(
-        cluster_node
-            .configuration()
-            .peers
-            .begin(),
-        cluster_node
-            .configuration()
-            .peers
-            .end(),
-        [node_id](
-            const cluster::PeerDefinition& peer
-        )
-        {
-            return peer.node_id == node_id;
-        }
+    return cluster_node.is_known_peer(
+        node_id
     );
 }
 
@@ -398,6 +389,10 @@ nlohmann::ordered_json make_cluster_payload(
         {
             "cluster_id",
             snapshot.configuration.cluster_id
+        },
+        {
+            "membership_epoch",
+            snapshot.membership_epoch
         },
         {
             "local_node",
@@ -752,6 +747,17 @@ HttpRouter::route_cluster_request(
         request_target(
             request
         );
+
+    if (
+        target.starts_with(
+            cluster_members_prefix
+        )
+    )
+    {
+        return route_cluster_membership_request(
+            request
+        );
+    }
 
     if (
         target ==
